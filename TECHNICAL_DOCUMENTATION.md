@@ -11,8 +11,10 @@ La sfida principale del progetto è stata garantire la totale sicurezza dei dati
 ### 1.1 Il concetto di "One-Way Valve" (Valvola a Singola Via)
 Per prevenire la permanenza di dati in chiaro su supporti rimovibili, abbiamo progettato un'architettura a tre stadi rigorosamente separati:
 1.  **Staging Locale (`C:\`)**: L'acquisizione dei PDF originali avviene in una cartella sicura sul disco fisso locale dell'ospedale (es. `Staging`). I file non vengono *mai* copiati direttamente sulla chiavetta in questa fase.
-2.  **Ridenominazione e Dissociazione Sintetica**: Appena acquisito, il PDF viene immediatamente rinominato con un UUID crittografico e inserito in una sotto-cartella genitore (es. `Paziente_3153861F`). Questo rompe istantaneamente la catena associativa (il file "Rossi_Mario_Esami.pdf" cessa di esistere prima ancora di essere letto).
-3.  **Output Removibile (`E:\`)**: Solo il documento finale, processato e redatto, viene serializzato e salvato fisicamente sulla chiavetta USB (la cartella `output_pdf`).
+2.  **Ridenominazione e Strutturazione Standard (UUID)**: Appena acquisiti, i file di un paziente vengono immediatamente rinominati con uno stesso UUID generato casualmente (es. `3153861F_Lab.pdf`, `3153861F_Clinica.pdf`) e inseriti in una sotto-cartella genitore organizzata (es. `Paziente_3153861F`). Questo approccio offre un duplice vantaggio: 
+    *   Rompe istantaneamente la catena associativa (il file "Rossi_Mario_Esami.pdf" cessa di esistere). 
+    *   Crea una struttura fissa e predicibile, ideale per permettere l'invio o l'inserimento automatizzato dei file nella successiva pipeline di sorveglianza dell'istituto.
+3.  **Output Removibile (`E:\`)**: Solo il documento finale, processato e in forma organizzata, viene esportato sulla chiavetta USB (dentro la cartella `output_pdf/Paziente_UUID/`).
 
 ### 1.2 Zero-Trace Execution & Portability (Esecuzione senza tracce)
 Il paradigma richiesto era il "Plug & Play" su macchine Windows aziendali limitate.
