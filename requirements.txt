@@ -1,0 +1,6 @@
+streamlit<1.40.0
+PyMuPDF
+Pillow
+streamlit-drawable-canvas
+json-repair
+gliner
