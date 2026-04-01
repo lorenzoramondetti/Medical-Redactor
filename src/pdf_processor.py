@@ -1,8 +1,5 @@
-
 import fitz  # PyMuPDF
-from io import BytesIO
-from PIL import Image
-import fitz  # PyMuPDF
+import re
 from io import BytesIO
 from PIL import Image
 from utils import logger
@@ -29,6 +26,16 @@ class PDFProcessor:
 
         page = self.doc[page_index]
         
+        # 1. Get filtered rectangles for terms (Whole words only)
+        all_terms_rects = []
+        if terms_to_highlight:
+            words = page.get_text("words") # (x0, y0, x1, y1, "word", block_no, line_no, word_no)
+            for term in terms_to_highlight:
+                candidates = page.search_for(term)
+                for rect in candidates:
+                    if self._is_whole_word(rect, term, words):
+                        all_terms_rects.append(rect)
+
         # Create a temporary PDF page to draw text highlights (simulating redaction view)
         # We don't want to modify the actual doc yet.
         temp_doc = fitz.open()
@@ -36,14 +43,12 @@ class PDFProcessor:
         temp_page.show_pdf_page(temp_page.rect, self.doc, page_index)
         
         # Highlight terms (Preview Only)
-        if terms_to_highlight:
+        if all_terms_rects:
             shape = temp_page.new_shape()
-            for term in terms_to_highlight:
-                rects = temp_page.search_for(term)
-                for rect in rects:
-                    # Red semi-transparent rect
-                    shape.draw_rect(rect)
-                    shape.finish(color=(1, 0, 0), fill=(1, 0, 0), fill_opacity=0.3)
+            for rect in all_terms_rects:
+                # Red semi-transparent rect
+                shape.draw_rect(rect)
+                shape.finish(color=(1, 0, 0), fill=(1, 0, 0), fill_opacity=0.3)
             shape.commit()
 
         # Render high quality
@@ -86,10 +91,12 @@ class PDFProcessor:
             # 1. Text Redactions
             if i in redaction_map:
                 terms = redaction_map[i]
+                words = page.get_text("words")
                 for term in terms:
-                    rects = page.search_for(term)
-                    for rect in rects:
-                        page.add_redact_annot(rect, fill=(0, 0, 0))
+                    candidates = page.search_for(term)
+                    for rect in candidates:
+                        if self._is_whole_word(rect, term, words):
+                            page.add_redact_annot(rect, fill=(0, 0, 0))
             
             # 2. Manual Redactions (Rectangles)
             # Manual rects might be applied to ALL pages or Specific pages. 
@@ -110,6 +117,39 @@ class PDFProcessor:
         # Save with garbage collection and deflate to minimize size and remove history
         self.doc.save(out_buffer, garbage=4, deflate=True)
         return out_buffer.getvalue()
+
+    def _is_whole_word(self, rect, term, page_words):
+        """
+        Validates if a found rectangle corresponds to a whole word (or sequence of words).
+        Prevents partial matches like 'Rossi' inside 'Prossimo'.
+        """
+        def normalize(text):
+            # Lowercase and replace non-alphanumeric with spaces, then collapse
+            clean = re.sub(r'[^a-z0-9]', ' ', text.lower())
+            return " ".join(clean.split())
+
+        term_norm = normalize(term)
+        
+        # Find all words that significantly overlap with the candidate rectangle
+        # Important: Use '&' operator to avoid in-place modification of rect
+        overlapping_words = []
+        for w in page_words:
+            w_rect = fitz.Rect(w[:4])
+            intersection = rect & w_rect
+            
+            # Check if the match covers most of the individual WORD's area (90%)
+            if w_rect.get_area() > 0 and (intersection.get_area() / w_rect.get_area()) > 0.9:
+                 overlapping_words.append(w[4])
+        
+        if not overlapping_words:
+            return False
+            
+        # Reconstruct the overlapping context (full strings of words found)
+        context_norm = normalize(" ".join(overlapping_words))
+        
+        # A match is valid if the normalized term is effectively a full word match
+        # against the normalized context.
+        return term_norm == context_norm or term_norm in context_norm or context_norm in term_norm
 
     def close(self):
         self.doc.close()

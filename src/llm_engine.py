@@ -1,5 +1,4 @@
 import os
-import json
 from pathlib import Path
 from config import MODELS_DIR, SETTINGS
 from utils import logger
@@ -44,9 +43,6 @@ class LLMEngine:
 
         try:
             logger.info("Loading GLiNER model (urchade/gliner_multi_pii-v1)...")
-            # Load model. It will download the very first time (requires internet once), 
-            # then cache it locally in models/hf_cache for offline portable use.
-            # Force CPU usage if GPU setting is off, or use GPU if available.
             device = "cuda" if SETTINGS["use_gpu"] and torch.cuda.is_available() else "cpu"
             logger.info(f"Using device: {device}")
             
@@ -60,35 +56,38 @@ class LLMEngine:
         return self.model is not None
 
     def extract_pii(self, text, category="GENERIC"):
-        if not self.is_ready():
-            return []
-        
-        if not text.strip():
+        if not self.is_ready() or not text.strip():
             return []
             
         try:
-            # Dynamically adjust labels based on category
+            # Labels for GLiNER
             active_labels = self.labels.copy()
             if category == "DATI_STRUTTURATI":
-                # For Lab Results, we need to preserve dates/times for scientific validity.
-                # Remove generic date labels so the AI doesn't hunt them.
                 labels_to_remove = ["Data di ricovero", "Data di dimissione", "Data"]
                 active_labels = [l for l in active_labels if l not in labels_to_remove]
-                # Note: "Data di nascita" remains in the list!
 
-            # Predict entities. We lower the threshold slightly to catch more potential PII, 
-            # as false positives can be manually deleted by the user.
             entities = self.model.predict_entities(text, active_labels, threshold=0.45)
             
-            # Extract just the text from the found entities, filtering duplicates
-            sensitive_terms = list(set([entity["text"].strip() for entity in entities]))
+            sensitive_terms = set()
+            # UI labels to strip from result if AI includes them
+            label_prefixes = [
+                "Paziente:", "Sig.", "Dott.", "Dr.", "Dr.ssa", "Prof.", "Medico:", 
+                "Nome:", "Cognome:", "Medico curante:", "Curante:", "Reparto:", 
+                "Hospital:", "Ospedale:", "Osp:", "Ref:"
+            ]
             
-            # Clean up potential multi-line artifacts
-            clean_terms = [t for t in sensitive_terms if t and len(t) > 2 and '\n' not in t]
+            for entity in entities:
+                raw_text = entity["text"].strip()
+                # Clean up if AI captured the label with the name
+                for prefix in label_prefixes:
+                    if raw_text.lower().startswith(prefix.lower()):
+                        raw_text = raw_text[len(prefix):].strip()
+                
+                if len(raw_text) > 1 and '\n' not in raw_text:
+                    sensitive_terms.add(raw_text)
             
-            return clean_terms
+            return list(sensitive_terms)
             
         except Exception as e:
             logger.error(f"Inference error with GLiNER: {e}")
             return []
-

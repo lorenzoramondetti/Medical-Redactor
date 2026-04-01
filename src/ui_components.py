@@ -180,7 +180,7 @@ def sidebar_ui(memory):
         
         return grouped_patients, start_btn, ephemeral, manual_mode, custom_staging
 
-def render_acquisition_wizard():
+def render_acquisition_wizard(memory):
     """
     Renders the full-screen Patient Acquisition Wizard.
     Returns: bool (True if wizard is fully completed and AI should begin)
@@ -188,7 +188,11 @@ def render_acquisition_wizard():
     st.title("🏥 Patient Acquisition Wizard")
     st.markdown("Automated ingestion and structuring of hospital records.")
     
-    # Check if Staging Queue already has files and user wants to bypass wizard
+    with st.expander("🧠 Pre-emptive Memory Management (Optional)"):
+        st.caption("Configure presets and keywords BEFORE starting the analysis.")
+        memory_manager_ui(memory)
+    
+    st.divider()
     existing_staged = []
     try:
         existing_staged = [
@@ -462,25 +466,170 @@ def render_page_editor(file_name, page_index, pdf_processor, current_terms, manu
 
 def memory_manager_ui(memory):
     st.header("🧠 Memory Management")
+    
     if memory.ephemeral:
         st.warning("🕵️ Incognito Mode: Changes here will be lost on exit.")
         
-    t1, t2 = st.tabs(["Allowed Terms (Whitelist)", "Ignored Terms (Blacklist)"])
-    
-    with t1:
-        st.caption("Terms to ALWAYS redact (e.g., Doctor Names)")
-        val = st.text_area("Whitelist", value="\n".join(sorted(memory.whitelist)), height=200)
-        if st.button("Save Whitelist"):
-            new_set = set([t.strip() for t in val.split("\n") if t.strip()])
-            memory.whitelist = new_set
-            memory.save_memory()
-            st.success("Whitelist updated.")
+    # --- PRESET DATA ---
+    PRESETS = {
+        "Province Italiane (Redact)": {
+            "type": "whitelist",
+            "file": "sigle_province_italiane.json"
+        },
+        "Parole Indirizzo (Redact)": {
+            "type": "whitelist",
+            "terms": ["Via", "Piazza", "Viale", "Corso", "V.le", "P.zza", "Strada", "C.so"]
+        },
+        "Etichette Cliniche (Ignore)": {
+            "type": "blacklist",
+            "terms": ["Paziente:", "Nato il:", "Nata il:", "Data:", "CF:", "Referto:", "Codice Fiscale:", "Dati Strutturati", "PRONTO SOCCORSO"]
+        },
+        "Ruoli Medici (Ignore)": {
+            "type": "blacklist",
+            "terms": ["Medico di Guardia", "Infermiera", "Specializzando", "Anestesista", "Caposala", "Personale Infermieristico", "Medico Curante"]
+        },
+        "Dipartimenti (Ignore)": {
+            "type": "blacklist",
+            "terms": ["Cardiologia", "Radiologia", "Pronto Soccorso", "Chirurgia", "Medicina Generale", "Terapia Intensiva", "UOC"]
+        },
+        "Esami Comuni (Ignore)": {
+            "type": "blacklist",
+            "terms": ["E.C.G.", "RX", "TC", "RMN", "Ecografia", "Analisi del Sangue", "Esami Ematochimici", "EGA", "M.C."]
+        },
+        "Anatomia (Ignore)": {
+            "type": "blacklist",
+            "terms": ["Addome", "Torace", "SNC", "Arti", "Bacino", "Cuore", "Polmoni", "SNC", "Colonna"]
+        },
+        "Unità di Misura (Ignore)": {
+            "type": "blacklist",
+            "terms": ["mg/dL", "mmol/L", "mEq/L", "pg", "fL", "g/dL", "U/L"]
+        }
+    }
+
+    # Helper to add/remove presets
+    def toggle_preset(preset_name):
+        config = PRESETS[preset_name]
+        terms = []
+        if "file" in config:
+            import json
+            from config import PROVINCE_FILE
+            try:
+                with open(PROVINCE_FILE, "r", encoding="utf-8") as f:
+                    terms = json.load(f)
+            except: pass
+        else:
+            terms = config["terms"]
             
+        if config["type"] == "whitelist":
+            # Check if all terms are already in whitelist
+            all_in = all(t in memory.whitelist for t in terms)
+            if all_in:
+                memory.whitelist.difference_update(terms)
+            else:
+                memory.add_to_whitelist(terms)
+        else:
+            # Check if all terms are already in blacklist
+            all_in = all(t in memory.blacklist for t in terms)
+            if all_in:
+                memory.blacklist.difference_update(terms)
+                memory.blacklist_lower = {t.lower() for t in memory.blacklist}
+            else:
+                # Need to handle blacklist_lower update inside add_to_blacklist
+                memory.add_to_blacklist(terms)
+        
+        memory.save_memory()
+
+    # --- UI LAYOUT ---
+    t1, t2, t3 = st.tabs(["🔒 Whitelist (Redact)", "🚫 Blacklist (Ignore)", "🛠️ Presets"])
+    
+    with t3:
+        st.subheader("Quick-Toggle Presets")
+        st.caption("Apply batches of common terms to your memory.")
+        
+        cols = st.columns(2)
+        for i, preset_name in enumerate(PRESETS.keys()):
+            col = cols[i % 2]
+            config = PRESETS[preset_name]
+            
+            # Check current status
+            terms = []
+            if "file" in config:
+                # For provinces, just check one sample for UI speed
+                is_active = "(MI)" in memory.whitelist
+            else:
+                is_active = all(t in (memory.whitelist if config["type"] == "whitelist" else memory.blacklist) for t in config["terms"])
+            
+            btn_label = f"✅ {preset_name}" if is_active else f"➕ {preset_name}"
+            if col.button(btn_label, key=f"pre_{preset_name}", use_container_width=True):
+                toggle_preset(preset_name)
+                st.rerun()
+
+    with t1:
+        c_met1, c_met2 = st.columns([2, 1])
+        with c_met1:
+            st.markdown(f"### Redact {len(memory.whitelist)} terms")
+        with c_met2:
+            if st.button("🗑️ Clear All", key="clear_white"):
+                memory.whitelist = set()
+                memory.save_memory()
+                st.rerun()
+                
+        search_w = st.text_input("Search Whitelist", key="search_whitelist").lower()
+        
+        filtered_w = sorted([t for t in memory.whitelist if search_w in t.lower()])
+        
+        with st.container(height=300):
+            if not filtered_w:
+                st.write("No terms found.")
+            else:
+                for term in filtered_w:
+                    col_t, col_b = st.columns([4, 1])
+                    col_t.write(term)
+                    if col_b.button("🗑️", key=f"del_w_{term}"):
+                        memory.whitelist.remove(term)
+                        memory.save_memory()
+                        st.rerun()
+        
+        st.divider()
+        new_w = st.text_input("Add New Term to Whitelist", key="add_white")
+        if st.button("Add to Whitelist", use_container_width=True):
+            if new_w.strip():
+                memory.add_to_whitelist([new_w.strip()])
+                memory.save_memory()
+                st.rerun()
+
     with t2:
-        st.caption("Terms to NEVER redact (False Positives)")
-        val = st.text_area("Blacklist", value="\n".join(sorted(memory.blacklist)), height=200)
-        if st.button("Save Blacklist"):
-            new_set = set([t.strip() for t in val.split("\n") if t.strip()])
-            memory.blacklist = new_set
-            memory.save_memory()
-            st.success("Blacklist updated.")
+        c_met1_b, c_met2_b = st.columns([2, 1])
+        with c_met1_b:
+            st.markdown(f"### Ignore {len(memory.blacklist)} terms")
+        with c_met2_b:
+            if st.button("🗑️ Clear All", key="clear_black"):
+                memory.blacklist = set()
+                memory.blacklist_lower = set()
+                memory.save_memory()
+                st.rerun()
+                
+        search_b = st.text_input("Search Blacklist", key="search_blacklist").lower()
+        
+        filtered_b = sorted([t for t in memory.blacklist if search_b in t.lower()])
+        
+        with st.container(height=300):
+            if not filtered_b:
+                st.write("No terms found.")
+            else:
+                for term in filtered_b:
+                    col_t_b, col_b_b = st.columns([4, 1])
+                    col_t_b.write(term)
+                    if col_b_b.button("🗑️", key=f"del_b_{term}"):
+                        memory.blacklist.remove(term)
+                        memory.blacklist_lower.remove(term.lower())
+                        memory.save_memory()
+                        st.rerun()
+        
+        st.divider()
+        new_b = st.text_input("Add New Term to Blacklist", key="add_black")
+        if st.button("Add to Blacklist", use_container_width=True):
+            if new_b.strip():
+                memory.add_to_blacklist([new_b.strip()])
+                memory.save_memory()
+                st.rerun()

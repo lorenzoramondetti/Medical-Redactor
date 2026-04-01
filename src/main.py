@@ -6,6 +6,12 @@ from pathlib import Path
 
 # --- LOCAL IMPORTS ---
 from config import SETTINGS, OUTPUT_DIR, SETTINGS_FILE, save_settings
+from organization_utils import (
+    generate_patient_uuid, 
+    get_patient_folder_name, 
+    get_category_folder_name, 
+    get_output_filename
+)
 from utils import logger, cleanup_session_traces
 from redaction_logic import RedactionMemory, TextAnalyzer
 from llm_engine import LLMEngine
@@ -26,6 +32,7 @@ if 'initialized' not in st.session_state:
     st.session_state['memory'] = RedactionMemory(ephemeral=SETTINGS['ephemeral_session'])
     st.session_state['llm'] = LLMEngine()
     st.session_state['processed_data'] = {} # {filename: {page_idx: [terms]}}
+    st.session_state['original_findings'] = {} # {filename: {page_idx: [terms]}} - For auto-learning on export
     st.session_state['manual_rects'] = {}   # {filename: {page_idx: [[x0,y0,x1,y1]]}}
     st.session_state['file_buffers'] = {}   # {filename: bytes}
     st.session_state['file_objs'] = {}      # {filename: PDFProcessor} -> Cached Objects (careful with memory)
@@ -75,7 +82,7 @@ def run_analysis(patients_dict):
     for patient_id, categories in patients_dict.items():
         # Generate Synthetic ID for this patient if not exists
         if patient_id not in st.session_state['patient_uuids']:
-            st.session_state['patient_uuids'][patient_id] = uuid.uuid4().hex[:8].upper()
+            st.session_state['patient_uuids'][patient_id] = generate_patient_uuid()
             
         # Strategy: Process CARTELLA_CLINICA first, then DATI_STRUTTURATI so memory learns the patient.
         ordered_categories = ["CARTELLA_CLINICA", "DATI_STRUTTURATI", "GENERIC"]
@@ -98,6 +105,7 @@ def run_analysis(patients_dict):
                 
                 num_pages = processor.get_page_count()
                 file_results = {}
+                file_originals = {}
                 st.session_state['manual_rects'][f_name] = {} # Init manual rects
                 
                 for i in range(num_pages):
@@ -105,14 +113,11 @@ def run_analysis(patients_dict):
                     text = processor.extract_text(i)
                     
                     # ANALYZE
-                    # Pass the category to allow contextual rules (e.g. keeping dates in DATI_STRUTTURATI)
                     terms = analyzer.analyze_text(text, category=cat)
-                    file_results[i] = terms
+                    file_results[i] = list(terms)
+                    file_originals[i] = list(terms) # Save initial state separately
                     
                     # CROSS-DOCUMENT LEARNING:
-                    # If we are in the Cartella Clinica, immediately feed discovered terms
-                    # into the temporary memory so subsequent Lab Results (Dati Strutturati) 
-                    # catch them instantly as exact matches.
                     if cat == "CARTELLA_CLINICA":
                         st.session_state['memory'].add_to_whitelist(terms)
                     
@@ -121,6 +126,7 @@ def run_analysis(patients_dict):
                     time.sleep(0.01) # UI yield
                     
                 st.session_state['processed_data'][f_name] = file_results
+                st.session_state['original_findings'][f_name] = file_originals
     
     prog_bar.progress(1.0)
     status.success("Analysis Complete!")
@@ -138,7 +144,7 @@ if not st.session_state.get('processed_data'):
             run_analysis(grouped_patients)
     else:
         # Show Acquisition Wizard if no data is processed yet
-        render_acquisition_wizard()
+        render_acquisition_wizard(st.session_state['memory'])
 else:
     # --- REVIEW UI ---
     st.divider()
@@ -184,7 +190,17 @@ else:
              st.session_state['file_objs'][selected_file] = processor
 
         num_pages = processor.get_page_count()
-        if 'page_idx' not in st.session_state: st.session_state['page_idx'] = 0
+        
+        # Reset page index if file changed
+        if 'last_selected_file' not in st.session_state or st.session_state['last_selected_file'] != selected_file:
+            st.session_state['page_idx'] = 0
+            st.session_state['last_selected_file'] = selected_file
+            
+        # Ensure page index is within bounds
+        if 'page_idx' not in st.session_state: 
+            st.session_state['page_idx'] = 0
+        else:
+            st.session_state['page_idx'] = min(st.session_state['page_idx'], num_pages - 1)
         
         # Keyboard Navigation Injection (JS)
         import streamlit.components.v1 as components
@@ -210,18 +226,21 @@ else:
         # Navigation
         c1, c2, c3 = st.columns([1, 4, 1])
         with c1: 
-            if st.button("⬅️ Prev", key="btn_prev_page"): 
+            if st.button("⬅️ Prev", key="btn_prev_page", disabled=(num_pages <= 1 or st.session_state['page_idx'] <= 0)): 
                 st.session_state['page_idx'] = max(0, st.session_state['page_idx'] - 1)
                 st.rerun()
         with c3: 
-            if st.button("Next ➡️", key="btn_next_page"): 
+            if st.button("Next ➡️", key="btn_next_page", disabled=(num_pages <= 1 or st.session_state['page_idx'] >= num_pages - 1)): 
                 st.session_state['page_idx'] = min(num_pages - 1, st.session_state['page_idx'] + 1)
                 st.rerun()
         with c2:
-            new_page = st.slider("Page", 1, num_pages, st.session_state['page_idx'] + 1) - 1
-            if new_page != st.session_state['page_idx']:
-                st.session_state['page_idx'] = new_page
-                st.rerun()
+            if num_pages > 1:
+                new_page = st.slider("Page", 1, num_pages, st.session_state['page_idx'] + 1) - 1
+                if new_page != st.session_state['page_idx']:
+                    st.session_state['page_idx'] = new_page
+                    st.rerun()
+            else:
+                st.markdown("<p style='text-align: center; margin-top: 10px; color: gray;'>Page 1 of 1</p>", unsafe_allow_html=True)
 
         curr_page = st.session_state['page_idx']
         
@@ -342,12 +361,19 @@ else:
                 patient_files_to_save = [k for k in all_keys if k.startswith(curr_pat + "/")]
                 
                 all_final_terms = set()
+                all_original_terms = set()
                 
                 with st.spinner(f"Exporting patient folder {synthetic_id}..."):
                     for p_file in patient_files_to_save:
-                        # 1. Gather all terms for whitelist
+                        # 1. Gather all terms for learning
+                        # Final terms (requested for redaction)
                         for p_idx, t_list in st.session_state['processed_data'][p_file].items():
                             all_final_terms.update(t_list)
+                        
+                        # Original terms (found by AI/Memory initially)
+                        if p_file in st.session_state['original_findings']:
+                            for p_idx, t_list in st.session_state['original_findings'][p_file].items():
+                                all_original_terms.update(t_list)
                         
                         # 2. Render PDF
                         redaction_map = st.session_state['processed_data'][p_file]
@@ -359,35 +385,21 @@ else:
                         # 3. Create hierarchy
                         # Original key is "PAZIENTE_1/CARTELLA_CLINICA/verbale.pdf"
                         parts = p_file.split("/")
-                        if len(parts) >= 3:
-                            original_category = parts[-2]
-                            original_filename = parts[-1]
-                        else:
-                            original_category = "GENERIC"
-                            original_filename = parts[-1]
+                        original_category = parts[-2] if len(parts) >= 3 else "GENERIC"
+                        original_filename = parts[-1]
                             
-                        # Format Output Names
-                        root_folder_name = f"Paziente_{synthetic_id}"
+                        # Format Output Names using centralized logic
+                        root_folder_name = get_patient_folder_name(synthetic_id)
                         
                         # Count how many files are in this category for this patient
                         # to decide if we need to append an index (_1, _2...)
-                        cat_files = [f for f in patient_files_to_save if f.split("/")[-2] == original_category]
-                        needs_index = len(cat_files) > 1
-                        current_file_index = cat_files.index(p_file) + 1 if needs_index else ""
-                        suffix = f"_{current_file_index}" if needs_index else ""
+                        cat_files = [f for f in patient_files_to_save if f.split("/")[-2] == original_category] if len(parts) >= 3 else [p_file]
+                        current_file_index = cat_files.index(p_file) + 1 if len(cat_files) > 1 else None
                         
-                        if original_category == "CARTELLA_CLINICA":
-                            cat_folder_name = f"Cartella_Clinica_{synthetic_id}"
-                            out_filename = f"Cartella_Clinica_{synthetic_id}{suffix}.pdf"
-                        elif original_category == "DATI_STRUTTURATI":
-                            cat_folder_name = f"Dati_Laboratorio_{synthetic_id}"
-                            out_filename = f"Dati_Laboratorio_{synthetic_id}{suffix}.pdf"
-                        else:
-                            cat_folder_name = original_category
-                            # For unknown generic categories we keep original name logic
-                            out_filename = f"{synthetic_id}{suffix}_{original_filename}"
+                        cat_folder_name = get_category_folder_name(original_category, synthetic_id)
+                        out_filename = get_output_filename(original_category, synthetic_id, original_filename, current_file_index)
                             
-                        # Format output: OUTPUT_DIR / Paziente_4F8A9B2C / Cartella_Clinica_4F8A9B2C / Cartella_Clinica_4F8A9B2C_verbale.pdf
+                        # Final export path
                         target_dir = OUTPUT_DIR / root_folder_name / cat_folder_name
                         target_dir.mkdir(parents=True, exist_ok=True)
                         
@@ -395,7 +407,16 @@ else:
                         with open(out_path, "wb") as f:
                             f.write(pdf_bytes)
                 
+                # --- AUTO-LEARNING PHASE ---
+                # Add confirmed terms to whitelist
                 st.session_state['memory'].add_to_whitelist(list(all_final_terms))
+                
+                # Add terms that were suggested by AI but removed by user to blacklist
+                removed_by_user = all_original_terms - all_final_terms
+                if removed_by_user:
+                    st.session_state['memory'].add_to_blacklist(list(removed_by_user))
+                
+                # Save to disk (respects ephemeral setting inside save_memory)
                 st.session_state['memory'].save_memory()
                 
                 st.success(f"Patient {curr_pat} exported successfully to: {OUTPUT_DIR / root_folder_name}")
