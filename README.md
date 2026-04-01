@@ -11,7 +11,24 @@ Medical Redactor is an advanced, privacy-first, and fully portable Python applic
 - **Rule-Based Engine**: Custom Regex algorithms tailored for Italian Medical Records instantly extract tax codes, phone numbers, emails, and exact dates (while selectively preserving dates in structured lab data for scientific validity).
 - **Zero-Trace Execution**: The application runs entirely from a USB drive without installation, suppresses Python cache generation (`__pycache__`), and supports an "Incognito Session" mode where dynamic memory is wiped upon exit.
 - **Interactive Review UI**: A powerful Streamlit interface allows operators to visually inspect AI decisions, draw manual redaction rectangles across the PDF, and automatically propagate corrections to all subsequent pages of a document.
+- **Automated Memory Learning**: The system improves itself with every export. Confirmed redactions are added to a permanent whitelist, while removed AI suggestions are automatically blacklisted to prevent future false positives.
 - **Batch Processing**: A full-screen Patient Acquisition Wizard makes it easy to drag-and-drop hundreds of patient folders and process them sequentially without errors.
+
+## 🧪 Quality Assurance & Testing
+
+The project includes a comprehensive test suite covering core redaction logic, security boundaries, and performance.
+
+### 1. Automated CI/CD
+A GitHub Action is configured to run the full test suite (`run_all_tests.py`) on every push to the `main` branch, ensuring that the 'One-Way Valve' and other security invariants are never compromised.
+
+### 2. Manual Verification
+You can run the tests locally at any time:
+```bash
+python run_all_tests.py
+```
+
+### 3. Synthetic Test Data
+The repository includes a generation script (`generate_test_data.py`) that can create realistic, yet entirely synthetic, medical PDF documents for local stress testing without using real patient data.
 
 ## 📦 Architecture
 
