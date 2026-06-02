@@ -23,7 +23,7 @@ echo Starting Medical Redactor...
 echo Please wait for the browser to open.
 echo.
 
-"%PYTHON_EXE%" -m streamlit run src/main.py --browser.gatherUsageStats=false --server.runOnSave=false
+"%PYTHON_EXE%" -m streamlit run src/main.py --browser.gatherUsageStats=false --server.runOnSave=false --server.enableCORS=false --server.enableXsrfProtection=false --server.fileWatcherType=none
 
 REM --- EXIT ---
 pause

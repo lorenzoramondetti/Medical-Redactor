@@ -1,6 +1,9 @@
-streamlit<1.40.0
+streamlit>=1.50.0
 PyMuPDF
 Pillow
-streamlit-drawable-canvas
+streamlit-drawable-canvas-fix
 json-repair
 gliner
+onnxruntime
+huggingface-hub
+transformers>=4.42.0

@@ -7,6 +7,9 @@ models/
 staging_pazienti/
 output_pdf/
 test_data/
+synthetic_dataset/*.json
+synthetic_dataset/*.log
+synthetic_dataset/*.env
 
 # State and local configuration
 global_memory.json

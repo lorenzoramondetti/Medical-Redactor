@@ -138,87 +138,50 @@ class TextAnalyzer:
     def extract_regex_patterns(self, text, category="GENERIC"):
         patterns = set()
         
-        # 1. Codice Fiscale
-        cf_pattern = r'\b[A-Z]{6}[0-9LMNPQRSTUV]{2}[ABCDEHLMPRST][0-9LMNPQRSTUV]{2}[A-Z][0-9LMNPQRSTUV]{3}[A-Z]\b'
-        for match in re.finditer(cf_pattern, text):
-            patterns.add(match.group())
-            
-        cf_prefix_pattern = r'(?i)\b(?:c\.f\.|cf|codice fiscale)\s*[:\-]?\s*([A-Z0-9]{16})\b'
-        for match in re.finditer(cf_prefix_pattern, text):
-            patterns.add(match.group(1).upper())
-
-        # 2. Cartella Clinica
-        cartella_pattern = r'(?i)\b(?:n[°º]|numero|cart|cartella)\s*(?:cart|clinica)?\s*[:\-]?\s*(\d{5,15})\b'
-        for match in re.finditer(cartella_pattern, text):
-            patterns.add(match.group())
-            patterns.add(match.group(1))
-
-        # 3. Doctor/Staff Names based on prefixes. 
-        # We use a non-greedy name part to avoid capturing conjunctions like 'e' or 'dalla'.
-        # Prefixes are case-insensitive, but name components must be Title Case or ALL CAPS.
-        prefixes = r'(?i:dr\.|dott\.|dott\.ssa|prof\.|medico|dottore)'
-        name_comp = r'(?:[A-Z][a-z]+|[A-Z]{2,})'
-        dr_pattern = fr'\b{prefixes}\s+({name_comp}(?:\s+{name_comp})*)\b'
+        from regex_rules_manager import RegexRulesManager
+        manager = RegexRulesManager()
         
-        for match in re.finditer(dr_pattern, text):
-            name = match.group(1).strip()
-            if len(name) > 2:
-                patterns.add(match.group())
-                patterns.add(name)
-            
-        # Signature blocks
-        signature_pattern = r'\b[A-Z]\.\s+([A-Z]{3,})\b'
-        for match in re.finditer(signature_pattern, text):
-            patterns.add(match.group())
-            patterns.add(match.group(1))
-
-        # 4. Hospital / Institution Names
-        hospital_pattern = r'(?i)\b(?:a\.o\.|ospedale|azienda ospedaliera(?: universitaria)?|presidio ospedaliero|asl|ausl)\s+([A-Z][a-z]+(?:\s+[A-Za-z]+){0,4})\b'
-        for match in re.finditer(hospital_pattern, text):
-            patterns.add(match.group())
-            
-        capitalized_hospital_pattern = r'(?i)\b(?:a\.o\.)\s+([A-Z\s]+)(?:$|\n|\s\s)'
-        for match in re.finditer(capitalized_hospital_pattern, text):
-             patterns.add(f"A.O. {match.group(1).strip()}")
-
-        # 5. IP Addresses
-        ip_pattern = r'\b(?:[0-9]{1,3}\.){3}[0-9]{1,3}\b'
-        for match in re.finditer(ip_pattern, text):
-            patterns.add(match.group())
-
-        # 6. URLs
-        url_pattern = r'(?i)\b(?:https?://|www\.)[a-z0-9-]+(?:\.[a-z0-9-]+)+(?:[/?#][^\s]*)?\b'
-        for match in re.finditer(url_pattern, text):
-            patterns.add(match.group())
-
-        # 7. Email Addresses
-        email_pattern = r'(?i)\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b'
-        for match in re.finditer(email_pattern, text):
-            patterns.add(match.group())
-            
-        # 8. Dates (Supports partial/truncated years)
-        date_pattern = r'\b(?:0[1-9]|[12][0-9]|3[01])[-/./](?:0[1-9]|1[012])[-/./]\d{1,4}\b'
-        if category == "DATI_STRUTTURATI":
-            dob_pattern = r'(?i)\b(?:nat[oa]\s+il|data\s*(?:di\s*)?nascita|dob)\s*[:\-]?\s*(' + date_pattern + r')'
-            for match in re.finditer(dob_pattern, text):
-                patterns.add(match.group(1).strip())
-        else:
-            for match in re.finditer(date_pattern, text):
-                patterns.add(match.group())
-
-        # 9. Phone/Fax Numbers
-        phone_pattern = r'\b(?:\+39\s?)?(?:0\d{1,3}\s?[\d\s-]{5,10}|3\d{2}\s?[\d\s-]{6,8})\b'
-        for match in re.finditer(phone_pattern, text):
-            clean_phone = re.sub(r'[\s\-+]', '', match.group())
-            if len(clean_phone) >= 8:
-                patterns.add(match.group().strip())
-
-        # 10. Province Abbreviations
-        province_pattern = r'\([A-Z]{2}\)'
-        for match in re.finditer(province_pattern, text):
-            if match.group() in self.provinces:
-                patterns.add(match.group())
-
+        for rule_name, rule in manager.rules.items():
+            if not rule.get("active", True):
+                continue
+                
+            try:
+                pattern = rule["pattern"]
+                group_logic = rule.get("group", 0)
+                
+                # Special skip for dates in DATI_STRUTTURATI
+                if group_logic == "date_logic" and category == "DATI_STRUTTURATI":
+                    continue
+                if group_logic == "dob_logic" and category != "DATI_STRUTTURATI":
+                    continue
+                    
+                for match in re.finditer(pattern, text):
+                    # Evaluate custom grouping logic
+                    if group_logic == 0:
+                        patterns.add(match.group())
+                    elif group_logic == 1:
+                        patterns.add(match.group(1).upper())
+                    elif group_logic == "both":
+                        patterns.add(match.group())
+                        if len(match.groups()) > 0:
+                            patterns.add(match.group(1))
+                    elif group_logic == "prepend_ao":
+                        patterns.add(f"A.O. {match.group(1).strip()}")
+                    elif group_logic == "phone":
+                        clean_phone = re.sub(r'[\s\-+]', '', match.group())
+                        if len(clean_phone) >= 8:
+                            patterns.add(match.group().strip())
+                    elif group_logic == "province":
+                        if match.group() in self.provinces:
+                            patterns.add(match.group())
+                    elif group_logic == "date_logic" or group_logic == "dob_logic":
+                        if len(match.groups()) > 0:
+                            patterns.add(match.group(1).strip())
+                        else:
+                            patterns.add(match.group())
+            except Exception as e:
+                logger.error(f"Error applying regex rule '{rule_name}': {e}")
+                
         return patterns
 
     def analyze_text(self, text, category="GENERIC"):
@@ -236,8 +199,8 @@ class TextAnalyzer:
         whitelist_found = set()
         for term in self.memory.whitelist:
             if not term.strip(): continue
-            # Escape term (special chars like dots or parens) and add word boundaries
-            pattern = r'(?i)\b' + re.escape(term.strip()) + r'\b'
+            # Escape term (special chars like dots or parens) and add word boundaries via lookarounds
+            pattern = r'(?i)(?<!\w)' + re.escape(term.strip()) + r'(?!\w)'
             for match in re.finditer(pattern, text):
                 whitelist_found.add(match.group())
         
@@ -251,3 +214,63 @@ class TextAnalyzer:
             found_terms.update(filtered_llm)
         
         return sorted(list(found_terms))
+
+def classify_redacted_term(term):
+    import re
+    term = term.strip()
+    term_lower = term.lower()
+    
+    # 1. Codice Fiscale / Tessera Sanitaria / UK NHS
+    cf_pattern = r'^[A-Z]{6}[0-9LMNPQRSTUV]{2}[ABCDEHLMPRST][0-9LMNPQRSTUV]{2}[A-Z][0-9LMNPQRSTUV]{3}[A-Z]$'
+    ts_pattern = r'^\d{20}$'
+    nhs_pattern = r'^\d{3}\s?-?\s?\d{3}\s?-?\s?\d{4}$|^\d{10}$'
+    if re.match(cf_pattern, term, re.IGNORECASE) or re.match(ts_pattern, term) or re.match(nhs_pattern, term):
+        return "Codici Fiscali / Tessera Sanitaria / ID Nazionali"
+        
+    # 2. Email / URL / IP
+    email_pattern = r'^[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}$'
+    url_pattern = r'^(?:https?://|www\.)[a-z0-9-]+(?:\.[a-z0-9-]+)+(?:[/?#][^\s]*)?$'
+    ip_pattern = r'^(?:[0-9]{1,3}\.){3}[0-9]{1,3}$'
+    if re.match(email_pattern, term, re.IGNORECASE) or re.match(url_pattern, term, re.IGNORECASE) or re.match(ip_pattern, term):
+        return "Contatti Digitali (Email/URL/IP)"
+        
+    # 3. Dates
+    date_pattern = r'^(?:0[1-9]|[12][0-9]|3[01])[-/./](?:0[1-9]|1[012])[-/./]\d{1,4}$'
+    if re.match(date_pattern, term):
+        return "Date (Nascita/Ricovero/Dimissione)"
+        
+    # 4. Phone numbers / Fax
+    phone_pattern = r'^\+?[0-9\s.\-\(\)]{6,20}$'
+    if re.match(phone_pattern, term) and any(c.isdigit() for c in term):
+        if sum(c.isdigit() for c in term) >= 6:
+            return "Numeri di Telefono / Contatti"
+            
+    # 5. CAP (Zip Codes)
+    if term.isdigit() and len(term) == 5:
+        return "Indirizzi / CAP"
+
+    # 6. Cartella Clinica / Codice Paziente
+    code_pattern = r'^[A-Za-z0-9\-/_]{5,15}$'
+    if re.match(code_pattern, term) and any(c.isdigit() for c in term) and any(c.isalpha() for c in term):
+        return "Codici Identificativi (Cartella/Paziente)"
+    if term.isdigit() and 4 <= len(term) <= 12:
+        return "Codici Identificativi (Cartella/Paziente)"
+        
+    # 7. Hospitals / Medical centers
+    hospital_keywords = ["ospedale", "policlinico", "clinica", "asl", "ausl", "presidio", "azienda ospedaliera"]
+    if any(k in term_lower for k in hospital_keywords):
+        return "Strutture Sanitarie (Ospedali/Cliniche/ASL)"
+        
+    # 8. Prefixes of doctors/names
+    prefixes = ["dr.", "dott.", "dott.ssa", "prof.", "medico", "dr", "dottore", "sig.", "sig.ra"]
+    if any(term_lower.startswith(p) for p in prefixes) or any(term_lower.startswith(p + " ") for p in prefixes):
+        return "Nomi Personali (Medici/Pazienti)"
+        
+    # 9. Name heuristics
+    if term.replace(" ", "").isalpha():
+        words = term.split()
+        if 1 <= len(words) <= 4:
+            if all(w[0].isupper() or w.isupper() for w in words):
+                return "Nomi Personali (Medici/Pazienti)"
+                
+    return "Altre Informazioni Sensibili"

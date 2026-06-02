@@ -16,7 +16,7 @@ class PDFProcessor:
             return self.doc[page_index].get_text()
         return ""
 
-    def render_page_for_canvas(self, page_index, terms_to_highlight=None, max_width=800):
+    def render_page_for_canvas(self, page_index, terms_to_highlight=None, max_width=1100):
         """
         Renders a page used for the Manual Redaction Canvas.
         Returns: (PIL Image, scale_factor, original_dimensions)
@@ -28,31 +28,25 @@ class PDFProcessor:
         
         # 1. Get filtered rectangles for terms (Whole words only)
         all_terms_rects = []
+        seen_rects = set()
+        
         if terms_to_highlight:
             words = page.get_text("words") # (x0, y0, x1, y1, "word", block_no, line_no, word_no)
             for term in terms_to_highlight:
                 candidates = page.search_for(term)
                 for rect in candidates:
                     if self._is_whole_word(rect, term, words):
-                        all_terms_rects.append(rect)
+                        # Deduplicate overlapping rectangles for the same word
+                        # Round to 1 decimal place to handle slight floating point differences
+                        rect_key = (round(rect.x0, 1), round(rect.y0, 1), round(rect.x1, 1), round(rect.y1, 1))
+                        if rect_key not in seen_rects:
+                            seen_rects.add(rect_key)
+                            all_terms_rects.append({"rect": rect, "term": term})
 
-        # Create a temporary PDF page to draw text highlights (simulating redaction view)
-        # We don't want to modify the actual doc yet.
-        temp_doc = fitz.open()
-        temp_page = temp_doc.new_page(width=page.rect.width, height=page.rect.height)
-        temp_page.show_pdf_page(temp_page.rect, self.doc, page_index)
-        
-        # Highlight terms (Preview Only)
-        if all_terms_rects:
-            shape = temp_page.new_shape()
-            for rect in all_terms_rects:
-                # Red semi-transparent rect
-                shape.draw_rect(rect)
-                shape.finish(color=(1, 0, 0), fill=(1, 0, 0), fill_opacity=0.3)
-            shape.commit()
-
-        # Render high quality
-        pix = temp_page.get_pixmap(dpi=150)
+        # Non disegniamo più i rettangoli rossi sull'immagine PNG!
+        # In questo modo il Canvas frontend riceverà un'immagine pulita 
+        # e userà le rects per disegnare oggetti interattivi e selezionabili.
+        pix = page.get_pixmap(dpi=150)
         img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
         
         # Resize for display
@@ -63,18 +57,14 @@ class PDFProcessor:
             new_height = int(img.height * ratio)
             img = img.resize((max_width, new_height), Image.Resampling.LANCZOS)
             
-            # The canvas pixels are different from PDF points
-            # We need the scale from Canvas Pixels -> PDF Points
-            # PDF Points width = page.rect.width
-            # Canvas width = max_width
             scale_x = page.rect.width / max_width
             scale_y = page.rect.height / new_height
             
-            return img, scale_x, scale_y
+            return img, scale_x, scale_y, all_terms_rects
         else:
             scale_x = page.rect.width / img.width
             scale_y = page.rect.height / img.height
-            return img, scale_x, scale_y
+            return img, scale_x, scale_y, all_terms_rects
 
     def save_redacted_pdf(self, redaction_map, manual_rects_map):
         """
@@ -137,19 +127,21 @@ class PDFProcessor:
             w_rect = fitz.Rect(w[:4])
             intersection = rect & w_rect
             
-            # Check if the match covers most of the individual WORD's area (90%)
-            if w_rect.get_area() > 0 and (intersection.get_area() / w_rect.get_area()) > 0.9:
+            # Qualsiasi intersezione è sufficiente per considerare la parola come "contesto"
+            if w_rect.get_area() > 0 and intersection.get_area() > 0:
                  overlapping_words.append(w[4])
         
         if not overlapping_words:
             return False
             
         # Reconstruct the overlapping context (full strings of words found)
-        context_norm = normalize(" ".join(overlapping_words))
+        context = " ".join(overlapping_words)
         
-        # A match is valid if the normalized term is effectively a full word match
-        # against the normalized context.
-        return term_norm == context_norm or term_norm in context_norm or context_norm in term_norm
+        # Validazione tramite Regex Boundary customizzata:
+        # Invece di usare \b, che fallisce se il termine finisce o inizia con punteggiatura (es. "O."),
+        # usiamo lookaround per assicurarci che non ci siano altre lettere/numeri adiacenti.
+        pattern = r'(?i)(?<!\w)' + re.escape(term) + r'(?!\w)'
+        return bool(re.search(pattern, context))
 
     def close(self):
         self.doc.close()

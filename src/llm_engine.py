@@ -8,23 +8,24 @@ hf_cache_dir = MODELS_DIR / "hf_cache"
 hf_cache_dir.mkdir(parents=True, exist_ok=True)
 os.environ["HF_HOME"] = str(hf_cache_dir)
 
-try:
-    from gliner import GLiNER
-    import torch
-    GLINER_AVAILABLE = True
-except ImportError:
-    GLINER_AVAILABLE = False
-    logger.warning("gliner module not found. AI features will be disabled.")
+def check_gliner_available():
+    try:
+        import importlib.util
+        torch_spec = importlib.util.find_spec("torch")
+        gliner_spec = importlib.util.find_spec("gliner")
+        return torch_spec is not None and gliner_spec is not None
+    except Exception:
+        return False
 
 class LLMEngine:
     def __init__(self):
         self.model = None
-        self.manual_mode = SETTINGS["manual_mode"]
+        self.manual_mode = SETTINGS.get("manual_mode", False)
         
-        if not GLINER_AVAILABLE:
+        self.gliner_available = check_gliner_available()
+        if not self.gliner_available:
             self.manual_mode = True
 
-        # Define labels to extract
         self.labels = [
             "Nome e Cognome", "Ospedale", "Città", "Provincia", "Regione",
             "Indirizzo", "CAP", "Codice Fiscale", "Telefono", "Email", "Fax",
@@ -34,39 +35,77 @@ class LLMEngine:
             "Targa Veicolo", "Numero di Conto", "URL", "Indirizzo IP", "Numero Patente"
         ]
 
-        self.initialize_engine()
-
     def initialize_engine(self):
+        self.manual_mode = SETTINGS.get("manual_mode", False)
+        if not check_gliner_available():
+            self.manual_mode = True
+
         if self.manual_mode:
             logger.info("Manual Mode enabled. LLM Engine disabled.")
             return
 
+        self.initialize_gliner_engine()
+
+    def initialize_gliner_engine(self):
         try:
-            logger.info("Loading GLiNER model (urchade/gliner_multi_pii-v1)...")
-            device = "cuda" if SETTINGS["use_gpu"] and torch.cuda.is_available() else "cpu"
-            logger.info(f"Using device: {device}")
+            logger.info("Loading GLiNER ONNX model (onnx-community/gliner_multi_pii-v1)...")
+            import torch
+            from gliner import GLiNER
             
-            self.model = GLiNER.from_pretrained("urchade/gliner_multi_pii-v1", local_files_only=False).to(device)
-            logger.info("GLiNER model loaded successfully.")
+            # Apply PyTorch classes path hotfix locally
+            try:
+                torch.classes.__path__ = []
+            except:
+                pass
+                
+            device = "cuda" if SETTINGS.get("use_gpu", True) and torch.cuda.is_available() else "cpu"
+            logger.info(f"Using GLiNER device: {device} (with ONNX Runtime)")
+            
+            self.model = GLiNER.from_pretrained(
+                "onnx-community/gliner_multi_pii-v1", 
+                local_files_only=False,
+                load_onnx_model=True,
+                onnx_model_file="onnx/model.onnx"
+            )
+            self.model.to(device)
+            logger.info("GLiNER ONNX model loaded successfully.")
         except Exception as e:
             logger.error(f"Failed to load GLiNER model: {e}")
             self.model = None
+
+    def reset_engine(self):
+        self.model = None
+        try:
+            import torch
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+        except:
+            pass
+        logger.info("LLM Engine reset. Models unloaded from memory.")
 
     def is_ready(self):
         return self.model is not None
 
     def extract_pii(self, text, category="GENERIC"):
-        if not self.is_ready() or not text.strip():
+        if not text.strip():
+            return []
+            
+        if not self.is_ready():
+            self.initialize_engine()
+            
+        if not self.is_ready():
+            logger.warning("LLM Engine model is not initialized or failed to load.")
             return []
             
         try:
             # Labels for GLiNER
             active_labels = self.labels.copy()
             if category == "DATI_STRUTTURATI":
-                labels_to_remove = ["Data di ricovero", "Data di dimissione", "Data"]
+                labels_to_remove = ["Data"]
                 active_labels = [l for l in active_labels if l not in labels_to_remove]
 
-            entities = self.model.predict_entities(text, active_labels, threshold=0.45)
+            threshold = SETTINGS.get("ai_threshold", 0.45)
+            entities = self.model.predict_entities(text, active_labels, threshold=threshold)
             
             sensitive_terms = set()
             # UI labels to strip from result if AI includes them

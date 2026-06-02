@@ -20,13 +20,15 @@ MEMORY_FILE = BASE_DIR / "global_memory.json"
 IGNORE_FILE = BASE_DIR / "global_ignore.json"
 PROVINCE_FILE = BASE_DIR / "sigle_province_italiane.json"
 SETTINGS_FILE = BASE_DIR / "settings.json"
+REGEX_RULES_FILE = BASE_DIR / "regex_rules.json"
 
 # 3. Default Settings
 DEFAULT_SETTINGS = {
     "use_gpu": True,          # Auto-detect if possible
     "manual_mode": False,     # Force manual mode (no AI)
     "ephemeral_session": False, # Incognito mode (don't save memory to disk)
-    "custom_staging_path": "" # Optional C:\ path for strict Hospital compliance (One-Way Valve)
+    "custom_staging_path": "", # Optional C:\ path for strict Hospital compliance (One-Way Valve)
+    "ai_threshold": 0.45      # Default GLiNER / AI confidence threshold
 }
 
 def load_settings():
@@ -50,11 +52,13 @@ def save_settings(settings):
 # Global Config Object (Singleton-ish)
 SETTINGS = load_settings()
 
-# STAGING_DIR configuration (Dynamic for Security Level 2)
+# STAGING_DIR configuration (Host PC Staging to protect USB from unredacted data)
+import tempfile
+
 if SETTINGS.get("custom_staging_path", "").strip():
     STAGING_DIR = Path(SETTINGS["custom_staging_path"].strip())
 else:
-    STAGING_DIR = BASE_DIR / "staging_pazienti"
+    STAGING_DIR = Path(tempfile.gettempdir()) / "MedicalRedactorStaging"
 
 # Ensure directories exist
 OUTPUT_DIR.mkdir(exist_ok=True)
@@ -63,6 +67,7 @@ MODELS_DIR.mkdir(exist_ok=True)
 try:
     STAGING_DIR.mkdir(parents=True, exist_ok=True)
 except PermissionError:
-    # Fallback to local if custom path is totally inaccessible
+    # Fallback to local USB if custom path or host temp is totally inaccessible
     STAGING_DIR = BASE_DIR / "staging_pazienti"
     STAGING_DIR.mkdir(parents=True, exist_ok=True)
+

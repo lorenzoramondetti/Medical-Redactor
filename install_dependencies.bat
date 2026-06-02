@@ -33,6 +33,13 @@ echo [INFO] Installing packages from requirements.txt...
 "%PYTHON_EXE%" -m pip install -r requirements.txt
 
 echo.
+echo [INFO] Performing cleanup to reduce USB footprint (Removing PyTorch CUDA dependencies)...
+"%PYTHON_EXE%" -m pip uninstall torch torchvision torchaudio nvidia-cublas-cu12 nvidia-cudnn-cu12 nvidia-cufft-cu12 nvidia-curand-cu12 nvidia-cusolver-cu12 nvidia-cusparse-cu12 nvidia-nccl-cu12 nvidia-nvtx-cu12 triton -y
+
+echo [INFO] Installing lightweight PyTorch (CPU only) to satisfy GLiNER dependencies...
+"%PYTHON_EXE%" -m pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
+
+echo.
 echo ===================================================
 echo   Installation Complete!
 echo   You can now run 'start_portable.bat'

@@ -12,6 +12,7 @@ Medical Redactor is an advanced, privacy-first, and fully portable Python applic
 - **Zero-Trace Execution**: The application runs entirely from a USB drive without installation, suppresses Python cache generation (`__pycache__`), and supports an "Incognito Session" mode where dynamic memory is wiped upon exit.
 - **Interactive Review UI**: A powerful Streamlit interface allows operators to visually inspect AI decisions, draw manual redaction rectangles across the PDF, and automatically propagate corrections to all subsequent pages of a document.
 - **Automated Memory Learning**: The system improves itself with every export. Confirmed redactions are added to a permanent whitelist, while removed AI suggestions are automatically blacklisted to prevent future false positives.
+- **Digital Signatures & Metadata Destruction**: The redaction process uses advanced PDF rebuilding (`garbage=4` and `deflate=True` algorithms). This entirely scrubs the document's XREF tables, permanently destroying hidden metadata (e.g., author, software properties) and irreversibly breaking any cryptographic digital signatures (like P7M or invisible PDF signatures).
 - **Batch Processing**: A full-screen Patient Acquisition Wizard makes it easy to drag-and-drop hundreds of patient folders and process them sequentially without errors.
 
 ## 🧪 Quality Assurance & Testing

@@ -22,7 +22,7 @@ class TestOrganizationUtils(unittest.TestCase):
         u2 = generate_patient_uuid()
         
         self.assertEqual(len(u1), 8)
-        self.assertTrue(u1.isupper())
+        self.assertTrue(not any(c.islower() for c in u1))
         self.assertNotEqual(u1, u2) # Basic uniqueness check
         
         # Verify it's valid hex

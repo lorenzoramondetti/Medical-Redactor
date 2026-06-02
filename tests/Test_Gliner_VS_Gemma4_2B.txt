@@ -1,0 +1,65 @@
+Report Benchmark Comparativo: GLiNER vs Gemma 4 E2B
+Questo report confronta in modo oggettivo le due tecnologie di Intelligenza Artificiale integrate in Medical Redactor per l'anonimizzazione dei testi clinici:
+
+GLiNER (Modello ONNX basato su Named Entity Recognition strutturato)
+Gemma 4 E2B (Modello Generativo Causal LLM da 2 miliardi di parametri ottimizzato)
+📊 Prestazioni & Impatto Hardware
+Metrica	GLiNER (ONNX)	Gemma 4 E2B	Rapporto / Differenza
+Tempo di Caricamento	5.05s	23.08s	Gemma richiede 4.6x più tempo
+Latenza di Inferenza (Media per pagina)	0.106s	39.382s	GLiNER è 370.5x più veloce
+Occupazione RAM di Sistema	1549.2 MB	2908.6 MB	Gemma occupa +1359.4 MB
+Occupazione VRAM (GPU)	0.0 MB	0.0 MB	Esecuzione su CPU per entrambi
+NOTE
+
+Poiché il test è stato eseguito interamente su CPU, i modelli non hanno caricato pesi sulla VRAM GPU. Su CPU pura, Gemma richiede molta più potenza di calcolo ed esibisce una latenza di circa 39 secondi a pagina, mentre GLiNER ONNX è ottimizzato per la CPU ed elabora in un decimo di secondo (0.1s).
+
+🎯 Qualità, Sensibilità e Accuratezza
+L'analisi è stata condotta su un referto medico standard contenente 11 entità sensibili (PII) definite come Ground Truth (nomi, ospedali, date, codici fiscali, indirizzi, telefoni ed email).
+
+Metriche di Valutazione
+Modello AI	Precisione (Nessun Falso Positivo)	Sensibilità / Recall (Nessun Dato Perso)	F1-Score (Bilanciamento Finale)
+GLiNER (ONNX)	91.7%	100.0%	95.7%
+Gemma 4 E2B	90.9%	90.9%	90.9%
+🔍 Dettaglio delle Estrazioni
+🔹 GLiNER (ONNX)
+Termini Correttamente Rilevati (11/11):
+10/03/2026
+24/12/1980
+3331234567
+giuseppe verdi
+mario rossi
+mario.rossi@email.it
+milano
+ospedale san raffaele
+roma
+rssmra80t24h501j
+via san raffaele 12
+Termini Mancati / Non Rilevati (0):
+Nessuno! Copertura totale delle entità.
+Falsi Positivi / Rumore (1):
+15/03/2026 (Nota: Si tratta della data del referto, tecnicamente un'entità sensibile valida ma esclusa dal Ground Truth stretto).
+🔸 Gemma 4 E2B
+Termini Correttamente Rilevati (10/11):
+10/03/2026
+24/12/1980
+3331234567
+giuseppe verdi
+mario rossi
+mario.rossi@email.it
+milano
+ospedale san raffaele
+rssmra80t24h501j
+via san raffaele 12
+Termini Mancati / Non Rilevati (1):
+roma
+Falsi Positivi / Rumore (1):
+15/03/2026 (Stesso falso positivo di GLiNER).
+💡 Conclusioni e Consigli d'Uso
+GLiNER (ONNX):
+
+Vantaggi: Estremamente leggero (solo poche centinaia di MB), fulmineo (frazioni di secondo per pagina) e immediatamente avviabile senza attese. Ottimo per PC aziendali/ospedalieri datati o installazioni offline dirette da USB.
+Limitazioni: Meno flessibile nel comprendere forme colloquiali o strutture sintattiche atipiche e non standardizzate.
+Gemma 4 E2B:
+
+Vantaggi: Capacità di astrazione e contestualizzazione straordinaria tipica dei Large Language Models. Riesce a rilevare le PII anche quando nascoste in frasi complesse o discorsive.
+Limitazioni: Richiede un hardware di livello superiore, soprattutto in assenza di una scheda grafica Nvidia CUDA (su CPU pura il tempo per singola pagina può salire notevolmente).
