@@ -66,12 +66,61 @@ class PDFProcessor:
             scale_y = page.rect.height / img.height
             return img, scale_x, scale_y, all_terms_rects
 
-    def save_redacted_pdf(self, redaction_map, manual_rects_map):
+    def _parse_date(self, text, preferred_format="%d/%m/%Y"):
+        import re
+        from datetime import datetime
+        text = text.strip()
+        
+        # Estrae una possibile data numerica con separatori
+        match = re.search(r'(\d{1,4})[-/./](\d{1,2})[-/./](\d{1,4})', text)
+        if not match:
+            return None
+            
+        date_str = match.group(0)
+        date_str = re.sub(r'[-.]', '/', date_str)
+        
+        # Prepara la lista di formati da provare, partendo da quello preferito
+        # Sostituiamo i - con / per il formato preferito dato che abbiamo normalizzato date_str
+        pref_fmt = preferred_format.replace('-', '/')
+        formats = [pref_fmt]
+        
+        # Aggiungiamo i formati comuni come fallback
+        all_formats = ['%d/%m/%Y', '%m/%d/%Y', '%Y/%m/%d', '%d/%m/%y', '%m/%d/%y', '%y/%m/%d']
+        for fmt in all_formats:
+            if fmt not in formats:
+                formats.append(fmt)
+                
+        for fmt in formats:
+            try:
+                return datetime.strptime(date_str, fmt)
+            except ValueError:
+                pass
+        return None
+
+    def save_redacted_pdf(self, redaction_map, manual_rects_map, date_settings=None):
         """
         Applies redactions irreversibly.
         :param redaction_map: {page_index: [list of terms]}
         :param manual_rects_map: {page_index: [[x0,y0,x1,y1], ...]} # Note: handled per-file logic in main, but here we expect a map for this specific doc
+        :param date_settings: dict with date replacement configuration
         """
+        import datetime
+        date_active = False
+        baseline_date = None
+        baseline_day_index = 1
+        
+        if date_settings and date_settings.get("active"):
+            baseline_str = date_settings.get("baseline_date")
+            if baseline_str:
+                try:
+                    baseline_date = datetime.datetime.strptime(baseline_str, "%Y-%m-%d")
+                    date_active = True
+                    baseline_day_index = date_settings.get("baseline_day_index", 1)
+                    date_format = date_settings.get("date_format", "%d/%m/%Y")
+                    date_max_range_days = date_settings.get("date_max_range_days", 365)
+                except Exception:
+                    pass
+
         # We work on a copy or the current doc? Let's assume we modify self.doc or a copy.
         # Ideally, reload from bytes to be fresh if called multiple times, but here usually called once at end.
         
@@ -84,9 +133,22 @@ class PDFProcessor:
                 words = page.get_text("words")
                 for term in terms:
                     candidates = page.search_for(term)
+                    
+                    replacement_text = None
+                    if date_active:
+                        parsed_date = self._parse_date(term, preferred_format=date_format)
+                        if parsed_date:
+                            delta = (parsed_date - baseline_date).days
+                            if abs(delta) <= date_max_range_days:
+                                day_number = delta + baseline_day_index
+                                replacement_text = f"Day {day_number}"
+                            
                     for rect in candidates:
                         if self._is_whole_word(rect, term, words):
-                            page.add_redact_annot(rect, fill=(0, 0, 0))
+                            if replacement_text:
+                                page.add_redact_annot(rect, text=replacement_text, fill=(0, 0, 0), text_color=(1, 1, 1), fontsize=10, align=fitz.TEXT_ALIGN_CENTER)
+                            else:
+                                page.add_redact_annot(rect, fill=(0, 0, 0))
             
             # 2. Manual Redactions (Rectangles)
             # Manual rects might be applied to ALL pages or Specific pages. 

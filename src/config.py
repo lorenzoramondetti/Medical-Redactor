@@ -28,7 +28,12 @@ DEFAULT_SETTINGS = {
     "manual_mode": False,     # Force manual mode (no AI)
     "ephemeral_session": False, # Incognito mode (don't save memory to disk)
     "custom_staging_path": "", # Optional C:\ path for strict Hospital compliance (One-Way Valve)
-    "ai_threshold": 0.45      # Default GLiNER / AI confidence threshold
+    "ai_threshold": 0.45,     # Default GLiNER / AI confidence threshold
+    "date_replacement_active": False,
+    "baseline_date": None,
+    "baseline_day_index": 1,
+    "date_format": "%d/%m/%Y",
+    "date_max_range_days": 365
 }
 
 def load_settings():

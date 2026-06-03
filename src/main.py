@@ -1,7 +1,43 @@
-
 import os
 # Disable Streamlit's file watcher to prevent file-locking and crashes on portable USB drives
 os.environ["STREAMLIT_SERVER_ENABLE_FILE_WATCHER"] = "false"
+
+# Monkeypatch Streamlit to fix compatibility with streamlit-drawable-canvas on newer Streamlit versions
+try:
+    import streamlit.elements.image as st_image
+    
+    # Try importing the lib.image_utils if it exists, since the function might be there
+    try:
+        import streamlit.elements.lib.image_utils as st_image_utils
+    except ImportError:
+        st_image_utils = None
+
+    # Determine which module contains image_to_url
+    target_module = None
+    if hasattr(st_image, "image_to_url"):
+        target_module = st_image
+    elif st_image_utils is not None and hasattr(st_image_utils, "image_to_url"):
+        target_module = st_image_utils
+        # Ensure it's exposed on st_image since st_canvas imports it from there
+        st_image.image_to_url = st_image_utils.image_to_url
+
+    if target_module is not None:
+        class DummyLayoutConfig:
+            def __init__(self, width):
+                self.width = width
+        
+        _original_image_to_url = target_module.image_to_url
+        def patched_image_to_url(image, layout_config, *args, **kwargs):
+            if isinstance(layout_config, int):
+                layout_config = DummyLayoutConfig(layout_config)
+            return _original_image_to_url(image, layout_config, *args, **kwargs)
+            
+        target_module.image_to_url = patched_image_to_url
+        st_image.image_to_url = patched_image_to_url
+except Exception:
+    pass
+
+
 
 
 import streamlit as st
@@ -33,9 +69,9 @@ st.set_page_config(
 
 if 'wiped' in st.session_state:
     st.title("🏥 Medical Redactor - Zero Trace")
-    st.success("🔒 Sessione terminata con successo e tutti i dati temporanei sono stati eliminati in modo sicuro!")
-    st.info("La cartella di staging sul PC dell'ospedale è stata completamente svuotata. Nessun dato sensibile o file non anonimizzato è rimasto sul disco fisso dell'host o sulla chiavetta USB.")
-    st.warning("È ora possibile chiudere questa finestra del browser e arrestare il terminale.")
+    st.success("🔒 Session successfully terminated and all temporary data securely wiped!")
+    st.info("The staging folder on the hospital PC has been completely emptied. No sensitive data or un-anonymized files remain on the host hard drive or USB drive.")
+    st.warning("You can now safely close this browser window and stop the terminal.")
     st.stop()
 
 
@@ -117,7 +153,7 @@ patients_available.sort()
 is_review_mode = len(all_keys) > 0 and not st.session_state.get('auto_start_analysis')
 
 # --- SIDEBAR & SETTINGS ---
-grouped_patients, ephemeral_mode, manual_mode, custom_staging, new_active_model, ai_threshold = sidebar_ui(
+grouped_patients, ephemeral_mode, manual_mode, custom_staging, new_active_model, ai_threshold, date_replacement_active, baseline_date, baseline_day_index, date_format, date_max_range_days = sidebar_ui(
     st.session_state['memory'],
     is_review_phase=is_review_mode,
     patients_available=patients_available,
@@ -148,6 +184,27 @@ if new_active_model != SETTINGS.get('active_model', 'gliner'):
 
 if ai_threshold != SETTINGS.get('ai_threshold', 0.45):
     SETTINGS['ai_threshold'] = ai_threshold
+    settings_changed = True
+
+if date_replacement_active != SETTINGS.get('date_replacement_active', False):
+    SETTINGS['date_replacement_active'] = date_replacement_active
+    settings_changed = True
+
+baseline_date_str = baseline_date.strftime("%Y-%m-%d") if baseline_date else None
+if baseline_date_str != SETTINGS.get('baseline_date'):
+    SETTINGS['baseline_date'] = baseline_date_str
+    settings_changed = True
+
+if baseline_day_index != SETTINGS.get('baseline_day_index', 1):
+    SETTINGS['baseline_day_index'] = baseline_day_index
+    settings_changed = True
+
+if date_format != SETTINGS.get('date_format'):
+    SETTINGS['date_format'] = date_format
+    settings_changed = True
+
+if date_max_range_days != SETTINGS.get('date_max_range_days'):
+    SETTINGS['date_max_range_days'] = date_max_range_days
     settings_changed = True
 
 if settings_changed:
@@ -254,7 +311,7 @@ def start_background_analysis(patients_dict):
                         for i in range(num_pages):
                             with worker_lock:
                                 worker_status['current_page'] = i + 1
-                                worker_status['progress'] = f"Analisi di '{Path(f_name).name}' (Pagina {i+1} di {num_pages})..."
+                                worker_status['progress'] = f"Analyzing '{Path(f_name).name}' (Page {i+1} of {num_pages})..."
                                 
                             text = processor.extract_text(i)
                             terms = analyzer.analyze_text(text, category=cat)
@@ -326,7 +383,7 @@ def page_editor_fragment(selected_file, curr_page, processor):
             clean_term = new_term.strip(".,;:()")
             if clean_term not in updated_terms:
                 updated_terms.append(clean_term)
-                st.toast(f"✅ Aggiunto: {clean_term}")
+                st.toast(f"✅ Added: {clean_term}")
                 
             # Registra l'aggiunta dello strumento di testo nello storico
             if 'action_history' not in st.session_state:
@@ -452,7 +509,7 @@ def page_editor_fragment(selected_file, curr_page, processor):
                         updated_terms.remove(term_to_remove)
                         # Blacklist it so it doesn't get re-added by whitelist reconciliation
                         st.session_state['memory'].add_to_blacklist({term_to_remove})
-                        st.toast(f"↩️ Annullata aggiunta: {term_to_remove}")
+                        st.toast(f"↩️ Undid addition: {term_to_remove}")
                     undone = True
                 elif last_action["type"] == "add_rect":
                     if current_saved:
@@ -461,7 +518,7 @@ def page_editor_fragment(selected_file, curr_page, processor):
                         if apply_to_all:
                             for p in range(num_pages):
                                 st.session_state['manual_rects'][selected_file][p] = [r.copy() for r in current_saved]
-                        st.toast("↩️ Annullato rettangolo manuale")
+                        st.toast("↩️ Undid manual rectangle")
                     undone = True
                 break
                 
@@ -473,7 +530,7 @@ def page_editor_fragment(selected_file, curr_page, processor):
                 if apply_to_all:
                     for p in range(num_pages):
                         st.session_state['manual_rects'][selected_file][p] = [r.copy() for r in current_saved]
-                st.toast("↩️ Annullato rettangolo manuale")
+                st.toast("↩️ Undid manual rectangle")
         
         # Update processed_data in session state in case a term was removed
         st.session_state['processed_data'][selected_file][curr_page] = updated_terms
@@ -512,7 +569,7 @@ def page_editor_fragment(selected_file, curr_page, processor):
 if not st.session_state.get('processed_data') and not bg_running:
     
     if worker_error:
-        st.error("Il processo in background ha riscontrato un errore fatale:")
+        st.error("The background process encountered a fatal error:")
         st.code(worker_error)
         st.stop()
         
@@ -882,15 +939,15 @@ Analyzing <code style="background-color: #0F172A; padding: 2px 6px; border-radiu
                     total_pages_processed = 0
                     manual_rects_count = 0
                     category_counts = {
-                        "Codici Fiscali / Tessera Sanitaria / ID Nazionali": 0,
-                        "Date (Nascita/Ricovero/Dimissione)": 0,
-                        "Nomi Personali (Medici/Pazienti)": 0,
-                        "Strutture Sanitarie (Ospedali/Cliniche/ASL)": 0,
-                        "Contatti Digitali (Email/URL/IP)": 0,
-                        "Numeri di Telefono / Contatti": 0,
-                        "Codici Identificativi (Cartella/Paziente)": 0,
-                        "Indirizzi / CAP": 0,
-                        "Altre Informazioni Sensibili": 0
+                        "SSN / National ID / Tax Codes": 0,
+                        "Dates (Birth/Admission/Discharge)": 0,
+                        "Personal Names (Doctors/Patients)": 0,
+                        "Healthcare Facilities (Hospitals/Clinics)": 0,
+                        "Digital Contacts (Email/URL/IP)": 0,
+                        "Phone Numbers / Contacts": 0,
+                        "ID Codes (Record/Patient)": 0,
+                        "Addresses / ZIP Codes": 0,
+                        "Other Sensitive Information": 0
                     }
                     total_redacted_items_count = 0
                 
@@ -918,7 +975,15 @@ Analyzing <code style="background-color: #0F172A; padding: 2px 6px; border-radiu
                             for p_idx, rect_list in rect_map.items():
                                 manual_rects_count += len(rect_list)
                         
-                            pdf_bytes = proc.save_redacted_pdf(redaction_map, rect_map)
+                            date_settings = {
+                                "active": SETTINGS.get("date_replacement_active", False),
+                                "baseline_date": SETTINGS.get("baseline_date"),
+                                "baseline_day_index": SETTINGS.get("baseline_day_index", 1),
+                                "date_format": SETTINGS.get("date_format", "%d/%m/%Y"),
+                                "date_max_range_days": SETTINGS.get("date_max_range_days", 365)
+                            }
+                        
+                            pdf_bytes = proc.save_redacted_pdf(redaction_map, rect_map, date_settings)
                         
                             # 3. Create hierarchy
                             parts = p_file.split("/")
@@ -947,60 +1012,61 @@ Analyzing <code style="background-color: #0F172A; padding: 2px 6px; border-radiu
                         from datetime import datetime
                         curr_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                     
-                        report_md = f"""# 🏥 RAPPORTO DI AUDIT DI ANONIMIZZAZIONE GDPR
-Questo rapporto documenta le operazioni di anonimizzazione ed estrazione dei dati sensibili eseguite in conformità con il **Regolamento Generale sulla Protezione dei Dati (GDPR - UE 2016/679)**.
+                        report_md = f"""# 🏥 GDPR ANONYMIZATION AUDIT REPORT
+This report documents the anonymization and sensitive data extraction operations performed in compliance with the **General Data Protection Regulation (GDPR - EU 2016/679)**.
 
-In linea con il principio di **Privacy by Design & Zero-Trace**, questo documento contiene esclusivamente metriche aggregate e anonime. **Nessun dato sanitario protetto (PHI) o dato identificativo personale (PII) è presente in chiaro in questo report.**
-
----
-
-## 📋 Informazioni Generali
-- **ID Sintetico Paziente (UUID):** `{synthetic_id}`
-- **Data e Ora Elaborazione:** `{curr_time}`
-- **Stato di Conformità:** ✅ Anonimizzato con successo
-- **Modalità di Esecuzione:** {"Manuale (Senza IA)" if SETTINGS.get("manual_mode", False) else f"Assistita da IA ({SETTINGS.get('active_model', 'gliner').upper()})"}
-- **Sensibilità IA Applicata (Soglia):** `{SETTINGS.get('ai_threshold', 0.45):.2f}`
+In line with the principle of **Privacy by Design & Zero-Trace**, this document contains exclusively aggregated and anonymous metrics. **No Protected Health Information (PHI) or Personally Identifiable Information (PII) is present in cleartext in this report.**
 
 ---
 
-## 📊 Metriche del Processo
-| Metrica | Valore |
+## 📋 General Information
+- **Operator (Anonymization Supervisor):** `{st.session_state.get('operator_first_name', '')} {st.session_state.get('operator_last_name', '')}`
+- **Synthetic Patient ID (UUID):** `{synthetic_id}`
+- **Processing Date and Time:** `{curr_time}`
+- **Compliance Status:** ✅ Successfully anonymized
+- **Execution Mode:** {"Manual (Without AI)" if SETTINGS.get("manual_mode", False) else f"AI-Assisted ({SETTINGS.get('active_model', 'gliner').upper()})"}
+- **Applied AI Sensitivity (Threshold):** `{SETTINGS.get('ai_threshold', 0.45):.2f}`
+
+---
+
+## 📊 Process Metrics
+| Metric | Value |
 | :--- | :--- |
-| **Documenti Totali Elaborati** | {len(patient_files_to_save)} |
-| **Pagine Totali Esaminate** | {total_pages_processed} |
-| **Elementi Sensibili Oscurati (Univoci)** | {total_redacted_items_count} |
-| **Rettangoli Manuali Applicati** | {manual_rects_count} |
+| **Total Documents Processed** | {len(patient_files_to_save)} |
+| **Total Pages Examined** | {total_pages_processed} |
+| **Sensitive Elements Redacted (Unique)** | {total_redacted_items_count} |
+| **Manual Rectangles Applied** | {manual_rects_count} |
 
 ---
 
-## 🏷️ Entità Oscurate per Categoria
-Di seguito è riportato il conteggio delle informazioni personali rimosse, suddivise per tipologia di dato sensibile (GDPR Art. 4 & Art. 9):
+## 🏷️ Redacted Entities by Category
+Below is the count of removed personal information, divided by sensitive data type (GDPR Art. 4 & Art. 9):
 
-| Categoria di Dato Sensibile | Elementi Univoci Rilevati e Oscurati |
+| Sensitive Data Category | Unique Elements Detected and Redacted |
 | :--- | :---: |
-| 🆔 Codici Fiscali / Tessera Sanitaria / ID Nazionali | {category_counts.get("Codici Fiscali / Tessera Sanitaria / ID Nazionali", 0)} |
-| 📅 Date (Nascita/Ricovero/Dimissione) | {category_counts.get("Date (Nascita/Ricovero/Dimissione)", 0)} |
-| 👤 Nomi Personali (Medici/Pazienti) | {category_counts.get("Nomi Personali (Medici/Pazienti)", 0)} |
-| 🏥 Strutture Sanitarie (Ospedali/Cliniche/ASL) | {category_counts.get("Strutture Sanitarie (Ospedali/Cliniche/ASL)", 0)} |
-| 🌐 Contatti Digitali (Email/URL/IP) | {category_counts.get("Contatti Digitali (Email/URL/IP)", 0)} |
-| 📞 Numeri di Telefono / Contatti | {category_counts.get("Numeri di Telefono / Contatti", 0)} |
-| 🔢 Codici Identificativi (Cartella/Paziente) | {category_counts.get("Codici Identificativi (Cartella/Paziente)", 0)} |
-| 📍 Indirizzi / CAP | {category_counts.get("Indirizzi / CAP", 0)} |
-| ⚙️ Altre Informazioni Sensibili | {category_counts.get("Altre Informazioni Sensibili", 0)} |
+| 🆔 SSN / National ID / Tax Codes | {category_counts.get("SSN / National ID / Tax Codes", 0)} |
+| 📅 Dates (Birth/Admission/Discharge) | {category_counts.get("Dates (Birth/Admission/Discharge)", 0)} |
+| 👤 Personal Names (Doctors/Patients) | {category_counts.get("Personal Names (Doctors/Patients)", 0)} |
+| 🏥 Healthcare Facilities (Hospitals/Clinics) | {category_counts.get("Healthcare Facilities (Hospitals/Clinics)", 0)} |
+| 🌐 Digital Contacts (Email/URL/IP) | {category_counts.get("Digital Contacts (Email/URL/IP)", 0)} |
+| 📞 Phone Numbers / Contacts | {category_counts.get("Phone Numbers / Contacts", 0)} |
+| 🔢 ID Codes (Record/Patient) | {category_counts.get("ID Codes (Record/Patient)", 0)} |
+| 📍 Addresses / ZIP Codes | {category_counts.get("Addresses / ZIP Codes", 0)} |
+| ⚙️ Other Sensitive Information | {category_counts.get("Other Sensitive Information", 0)} |
 
 ---
 
-## 🧠 Stato Apprendimento Attivo (Active Learning)
-L'algoritmo di apprendimento dinamico memorizza le preferenze per garantire coerenza e accuratezza tra sessioni, senza esportare o caricare dati sensibili su server remoti.
+## 🧠 Active Learning State
+The dynamic learning algorithm memorizes preferences to ensure consistency and accuracy across sessions, without exporting or uploading sensitive data to remote servers.
 
-- **Elementi nella Whitelist Locale (Dati da oscurare):** `{len(st.session_state['memory'].whitelist)}` termini
-- **Elementi nella Blacklist Locale (Dati da ignorare):** `{len(st.session_state['memory'].blacklist)}` termini
-- **Tipo di Sessione:** {"Temporanea / Incognito (Zero Tracce su disco)" if SETTINGS.get("ephemeral_session", False) else "Permanente (Dati salvati in locale)"}
+- **Elements in Local Whitelist (Data to redact):** `{len(st.session_state['memory'].whitelist)}` terms
+- **Elements in Local Blacklist (Data to ignore):** `{len(st.session_state['memory'].blacklist)}` terms
+- **Session Type:** {"Ephemeral / Incognito (Zero Trace on disk)" if SETTINGS.get("ephemeral_session", False) else "Permanent (Data saved locally)"}
 
 ---
 
-## 🛡️ Dichiarazione di Conformità
-Tutte le informazioni personali identificate dall'operatore o dal modello predittivo AI sono state rimosse in modo definitivo, irreversibile e distruttivo tramite sovrascrittura con box opachi neri nei file PDF finali. Il processo garantisce l'annoimato dei soggetti interessati e impedisce tentativi di re-identificazione inversa mediante l'analisi del testo circostante.
+## 🛡️ Declaration of Compliance
+All personal information identified by the operator or the AI predictive model has been permanently, irreversibly, and destructively removed via opaque black box overwriting in the final PDF files. The process ensures the anonymity of the data subjects and prevents reverse re-identification attempts through surrounding text analysis.
 """
                         audit_report_path = OUTPUT_DIR / root_folder_name / "ANONYMIZATION_AUDIT_REPORT.md"
                         try:
@@ -1018,7 +1084,7 @@ Tutte le informazioni personali identificate dall'operatore o dal modello predit
                         
                         st.session_state['memory'].save_memory()
                         
-                        st.success(f"Dati di {synthetic_id} esportati con successo con Report Audit GDPR generato! L'IA ha aggiornato le preferenze per le future elaborazioni (se consentito).")
+                        st.success(f"Data for {synthetic_id} exported successfully with GDPR Audit Report! AI updated preferences for future operations (if permitted).")
                         # Premium green border glow animation (replaces unprofessional balloons)
                         st.html("""
 <style>

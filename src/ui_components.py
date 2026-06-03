@@ -123,6 +123,60 @@ def sidebar_ui(memory, is_review_phase=False, patients_available=None, all_keys=
                 value=SETTINGS.get("ephemeral_session", False),
                 help="If checked, learned terms are NOT saved to disk. Memory is wiped on exit."
             )
+            
+            # --- Date Replacement System ---
+            st.markdown("<div style='margin-top: 5px;'></div>", unsafe_allow_html=True)
+            date_replacement_active = st.checkbox(
+                "Date Replacement",
+                value=SETTINGS.get("date_replacement_active", False),
+                help="Replaces dates in the PDF with 'Day X' calculated from the baseline date.",
+                key="date_repl_check_1"
+            )
+            
+            baseline_date_str = SETTINGS.get("baseline_date")
+            import datetime
+            try:
+                default_date = datetime.datetime.strptime(baseline_date_str, "%Y-%m-%d").date() if baseline_date_str else datetime.date.today()
+            except Exception:
+                default_date = datetime.date.today()
+                
+            baseline_date = None
+            baseline_day_index = SETTINGS.get("baseline_day_index", 1)
+            
+            date_format = SETTINGS.get("date_format", "%d/%m/%Y")
+            date_max_range_days = SETTINGS.get("date_max_range_days", 365)
+            
+            if date_replacement_active:
+                baseline_date = st.date_input("Baseline Date (Admission)", value=default_date, key="date_input_1")
+                baseline_day_index = st.radio(
+                    "The admission day is:",
+                    options=[0, 1],
+                    format_func=lambda x: f"Day {x}",
+                    index=0 if baseline_day_index == 0 else 1,
+                    horizontal=True,
+                    key="day_idx_1"
+                )
+                
+                format_options = {"%d/%m/%Y": "DD/MM/YYYY", "%m/%d/%Y": "MM/DD/YYYY", "%Y-%m-%d": "YYYY-MM-DD"}
+                rev_format_options = {v: k for k, v in format_options.items()}
+                
+                selected_fmt_label = st.selectbox(
+                    "Preferred Date Format",
+                    options=list(format_options.values()),
+                    index=list(format_options.keys()).index(date_format) if date_format in format_options else 0,
+                    key="date_fmt_1"
+                )
+                date_format = rev_format_options[selected_fmt_label]
+                
+                date_max_range_days = st.number_input(
+                    "Maximum Day Range",
+                    min_value=1,
+                    max_value=36500,
+                    value=int(date_max_range_days),
+                    help="Dates further than these days from the baseline date (e.g. date of birth) will be redacted but not replaced with 'Day X'.",
+                    key="date_range_1"
+                )
+            
             manual_mode = SETTINGS.get("manual_mode", False)
             new_active_model = "gliner"
             ai_threshold = float(SETTINGS.get("ai_threshold", 0.45))
@@ -136,6 +190,59 @@ def sidebar_ui(memory, is_review_phase=False, patients_available=None, all_keys=
                 value=SETTINGS.get("ephemeral_session", False),
                 help="If checked, learned terms are NOT saved to disk. Memory is wiped on exit."
             )
+            
+            # --- Date Replacement System ---
+            st.markdown("<div style='margin-top: 5px;'></div>", unsafe_allow_html=True)
+            date_replacement_active = st.checkbox(
+                "Date Replacement",
+                value=SETTINGS.get("date_replacement_active", False),
+                help="Replaces dates in the PDF with 'Day X' calculated from the baseline date.",
+                key="date_repl_check_2"
+            )
+            
+            baseline_date_str = SETTINGS.get("baseline_date")
+            import datetime
+            try:
+                default_date = datetime.datetime.strptime(baseline_date_str, "%Y-%m-%d").date() if baseline_date_str else datetime.date.today()
+            except Exception:
+                default_date = datetime.date.today()
+                
+            baseline_date = None
+            baseline_day_index = SETTINGS.get("baseline_day_index", 1)
+            
+            date_format = SETTINGS.get("date_format", "%d/%m/%Y")
+            date_max_range_days = SETTINGS.get("date_max_range_days", 365)
+            
+            if date_replacement_active:
+                baseline_date = st.date_input("Baseline Date (Admission)", value=default_date, key="date_input_2")
+                baseline_day_index = st.radio(
+                    "The admission day is:",
+                    options=[0, 1],
+                    format_func=lambda x: f"Day {x}",
+                    index=0 if baseline_day_index == 0 else 1,
+                    horizontal=True,
+                    key="day_idx_2"
+                )
+                
+                format_options = {"%d/%m/%Y": "DD/MM/YYYY", "%m/%d/%Y": "MM/DD/YYYY", "%Y-%m-%d": "YYYY-MM-DD"}
+                rev_format_options = {v: k for k, v in format_options.items()}
+                
+                selected_fmt_label = st.selectbox(
+                    "Preferred Date Format",
+                    options=list(format_options.values()),
+                    index=list(format_options.keys()).index(date_format) if date_format in format_options else 0,
+                    key="date_fmt_2"
+                )
+                date_format = rev_format_options[selected_fmt_label]
+                
+                date_max_range_days = st.number_input(
+                    "Maximum Day Range",
+                    min_value=1,
+                    max_value=36500,
+                    value=int(date_max_range_days),
+                    help="Dates further than these days from the baseline date (e.g. date of birth) will be redacted but not replaced with 'Day X'.",
+                    key="date_range_2"
+                )
             
             manual_mode = st.checkbox(
                 "Manual Mode (No AI)", 
@@ -255,7 +362,7 @@ def sidebar_ui(memory, is_review_phase=False, patients_available=None, all_keys=
                                       
                               grouped_patients[pat_id][category].append(StagedFileWrapper(full_path, rel_path))
 
-        return grouped_patients, ephemeral, manual_mode, custom_staging, new_active_model, ai_threshold
+        return grouped_patients, ephemeral, manual_mode, custom_staging, new_active_model, ai_threshold, date_replacement_active, baseline_date, baseline_day_index, date_format, date_max_range_days
 
 def render_acquisition_wizard(memory):
     """
@@ -363,6 +470,20 @@ def render_acquisition_wizard(memory):
         "A human operator must supervise and verify all redacted documents before clinical use."
     )
     
+    # Operator Identity for GDPR Accountability
+    st.markdown("### ✍️ Operator Signature")
+    st.caption("Please provide your name to sign off on this anonymization session (required for GDPR Audit).")
+    col_fn, col_ln = st.columns(2)
+    with col_fn:
+        operator_fname = st.text_input("First Name", key="operator_first_name")
+    with col_ln:
+        operator_lname = st.text_input("Last Name", key="operator_last_name")
+        
+    operator_ready = bool(operator_fname.strip() and operator_lname.strip())
+    
+    if not operator_ready:
+        st.info("ℹ️ Please enter your First and Last Name to unlock the session start buttons.")
+    
     existing_staged = []
     try:
         existing_staged = [
@@ -414,8 +535,11 @@ def render_acquisition_wizard(memory):
                 with col_resume:
                     st.markdown('<span id="clinical-blue-btn"></span>', unsafe_allow_html=True)
                     if st.button("🔄 Resume Interrupted Session", use_container_width=True, type="primary"):
-                        st.session_state['auto_start_analysis'] = True
-                        st.rerun()
+                        if not operator_ready:
+                            st.error("⚠️ Please fill in your First and Last Name in the Operator Signature section above to proceed.")
+                        else:
+                            st.session_state['auto_start_analysis'] = True
+                            st.rerun()
                 with col_del:
                     st.markdown('<span id="clinical-red-btn"></span>', unsafe_allow_html=True)
                     if st.button("🗑️ Delete Session", use_container_width=True):
@@ -469,7 +593,7 @@ def render_acquisition_wizard(memory):
                         "$d.ValidateNames = $false; "
                         "$d.CheckFileExists = $false; "
                         "$d.CheckPathExists = $true; "
-                        "$d.FileName = 'Seleziona questa cartella'; "
+                        "$d.FileName = 'Select this folder'; "
                         "$d.Title = 'Select Secure Hospital Staging Folder'; "
                         "if ($d.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) { Write-Output ([System.IO.Path]::GetDirectoryName($d.FileName)) }"
                     )
@@ -639,8 +763,11 @@ def render_acquisition_wizard(memory):
             # Bottom of stacked card: Start Ingestion full-width button
             st.markdown('<span id="clinical-green-btn"></span>', unsafe_allow_html=True)
             if st.button("Start Ingestion", type="primary", use_container_width=True):
-                st.session_state['wizard_total'] = st.session_state['patients_count_selection']
-                st.rerun()
+                if not operator_ready:
+                    st.error("⚠️ Please fill in your First and Last Name in the Operator Signature section above to proceed.")
+                else:
+                    st.session_state['wizard_total'] = st.session_state['patients_count_selection']
+                    st.rerun()
                  
         # Pre-emptive Memory Management compressed into a dedicated expander dropdown menu
         st.divider()
@@ -674,12 +801,12 @@ def render_acquisition_wizard(memory):
     
     c1, c2 = st.columns(2)
     with c1:
-        st.markdown("### 📘 Cartella Clinica")
+        st.markdown("### 📘 Clinical Records")
         st.caption("Descriptive documents containing prose and names.")
         clinica_files = st.file_uploader("Upload Clinical Records", type="pdf", accept_multiple_files=True, key=f"up_c_{current}")
         
     with c2:
-        st.markdown("### 📊 Dati Strutturati")
+        st.markdown("### 📊 Structured Data")
         st.caption("Tabular lab results, blood work, etc.")
         laboratori_files = st.file_uploader("Upload Lab Results", type="pdf", accept_multiple_files=True, key=f"up_l_{current}")
 
@@ -687,13 +814,13 @@ def render_acquisition_wizard(memory):
     
     c3, c4 = st.columns(2)
     with c3:
-        st.markdown("### 🩺 Esami Strumentali")
-        st.caption("ECG, referti radiologici, spirometrie, ecc.")
+        st.markdown("### 🩺 Instrumental Exams")
+        st.caption("ECGs, radiological reports, spirometry, etc.")
         esami_files = st.file_uploader("Upload Instrumental Exams", type="pdf", accept_multiple_files=True, key=f"up_e_{current}")
         
     with c4:
-        st.markdown("### 👨‍⚕️ Consulenze Specialistiche")
-        st.caption("Referti di visite specialistiche (cardiologiche, neurologiche, ecc.)")
+        st.markdown("### 👨‍⚕️ Specialist Consultations")
+        st.caption("Specialist visit reports (cardiology, neurology, etc.)")
         consulenze_files = st.file_uploader("Upload Specialist Consultations", type="pdf", accept_multiple_files=True, key=f"up_s_{current}")
         
     st.markdown("---")
@@ -872,13 +999,67 @@ def render_page_editor(col_canvas, col_tools, file_name, page_index, pdf_process
     with col_canvas:
         st.subheader("🔎 Manual Redaction")
         
-        # Mode switch
-        canvas_mode = st.segmented_control(
-            "Select mode", 
-            options=["✏️ Draw", "🧹 Delete"], 
-            default="✏️ Draw",
-            key=f"canvas_mode_{file_name}_{page_index}"
+        # Mode switch and Zoom controls
+        if 'canvas_width' not in st.session_state:
+            st.session_state['canvas_width'] = 1100
+        canvas_width = st.session_state['canvas_width']
+        
+        # Inject CSS to make the zoom buttons look like a cohesive button group
+        st.markdown(
+            """
+            <style>
+            /* Container for the zoom controls */
+            div[data-testid="stHorizontalBlock"]:has(button[help="Zoom Out"]) {
+                background-color: #1E293B;
+                border-radius: 8px;
+                padding: 4px;
+                border: 1px solid #334155;
+                box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+                align-items: center;
+                gap: 2px !important;
+            }
+            /* Style the individual buttons inside the group to be seamless */
+            div[data-testid="stHorizontalBlock"]:has(button[help="Zoom Out"]) button {
+                border: none !important;
+                background-color: transparent !important;
+                color: #94A3B8 !important;
+                font-weight: 600 !important;
+                padding: 4px 0px !important;
+            }
+            div[data-testid="stHorizontalBlock"]:has(button[help="Zoom Out"]) button:hover {
+                background-color: #334155 !important;
+                color: #F8FAFC !important;
+                border-radius: 6px !important;
+            }
+            </style>
+            """, unsafe_allow_html=True
         )
+
+        col_mode, col_spacer, col_zoom = st.columns([1.5, 1.5, 1.2])
+        with col_mode:
+            canvas_mode = st.segmented_control(
+                "Select mode", 
+                options=["✏️ Draw", "🧹 Delete"], 
+                default="✏️ Draw",
+                key=f"canvas_mode_{file_name}_{page_index}",
+                label_visibility="collapsed"
+            )
+        with col_zoom:
+            zoom_pct = int(canvas_width / 1100 * 100)
+            z_col1, z_col2, z_col3 = st.columns([1, 1.2, 1], gap="small")
+            with z_col1:
+                if st.button("➖", key=f"zoom_out_{file_name}_{page_index}", help="Zoom Out", use_container_width=True):
+                    st.session_state['canvas_width'] = max(500, canvas_width - 100)
+                    st.rerun()
+            with z_col2:
+                if st.button(f"{zoom_pct}%", key=f"zoom_reset_{file_name}_{page_index}", help="Reset Zoom", use_container_width=True):
+                    st.session_state['canvas_width'] = 1100
+                    st.rerun()
+            with z_col3:
+                if st.button("➕", key=f"zoom_in_{file_name}_{page_index}", help="Zoom In", use_container_width=True):
+                    st.session_state['canvas_width'] = min(2200, canvas_width + 100)
+                    st.rerun()
+                    
         drawing_mode = "rect" if canvas_mode == "✏️ Draw" else "transform"
         
         if drawing_mode == "rect":
@@ -890,7 +1071,7 @@ def render_page_editor(col_canvas, col_tools, file_name, page_index, pdf_process
         # Cache the generated PIL image object. If we pass a brand new PIL image pointer to st_canvas 
         # on every rerun, it interprets it as a "new background" and fires an infinite loop of redraws.
         terms_hash = hash(tuple(updated_terms))
-        bg_cache_key = f"bg_{file_name}_{page_index}_{terms_hash}"
+        bg_cache_key = f"bg_{file_name}_{page_index}_{terms_hash}_{canvas_width}"
         
         # Free up memory from old page/term caches by keeping only the active one
         if st.session_state.get('active_bg_key') != bg_cache_key:
@@ -899,7 +1080,7 @@ def render_page_editor(col_canvas, col_tools, file_name, page_index, pdf_process
                 del st.session_state[old_key]
                 
             # Ora render_page_for_canvas ritorna anche ai_rects (coordinate PDF dei termini)
-            st.session_state[bg_cache_key] = pdf_processor.render_page_for_canvas(page_index, updated_terms)
+            st.session_state[bg_cache_key] = pdf_processor.render_page_for_canvas(page_index, updated_terms, max_width=canvas_width)
             st.session_state['active_bg_key'] = bg_cache_key
             
         bg_img, scale_x, scale_y, ai_rects = st.session_state[bg_cache_key]
@@ -940,7 +1121,7 @@ def render_page_editor(col_canvas, col_tools, file_name, page_index, pdf_process
             json_cache_key = f"canvas_json_{file_name}_{page_index}"
             rev_key = f"canvas_rev_{file_name}_{page_index}"
             rev = st.session_state.get(rev_key, 0)
-            widget_key = f"canvas_{file_name}_{page_index}_{rev}"
+            widget_key = f"canvas_{file_name}_{page_index}_{rev}_{canvas_width}"
             
             # To prevent the st_canvas floating-point infinite React loop, we MUST ensure 
             # the `initial_drawing` prop remains completely static for the lifetime of the widget_key.

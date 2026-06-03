@@ -225,52 +225,52 @@ def classify_redacted_term(term):
     ts_pattern = r'^\d{20}$'
     nhs_pattern = r'^\d{3}\s?-?\s?\d{3}\s?-?\s?\d{4}$|^\d{10}$'
     if re.match(cf_pattern, term, re.IGNORECASE) or re.match(ts_pattern, term) or re.match(nhs_pattern, term):
-        return "Codici Fiscali / Tessera Sanitaria / ID Nazionali"
+        return "SSN / National ID / Tax Codes"
         
     # 2. Email / URL / IP
     email_pattern = r'^[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}$'
     url_pattern = r'^(?:https?://|www\.)[a-z0-9-]+(?:\.[a-z0-9-]+)+(?:[/?#][^\s]*)?$'
     ip_pattern = r'^(?:[0-9]{1,3}\.){3}[0-9]{1,3}$'
     if re.match(email_pattern, term, re.IGNORECASE) or re.match(url_pattern, term, re.IGNORECASE) or re.match(ip_pattern, term):
-        return "Contatti Digitali (Email/URL/IP)"
+        return "Digital Contacts (Email/URL/IP)"
         
     # 3. Dates
     date_pattern = r'^(?:0[1-9]|[12][0-9]|3[01])[-/./](?:0[1-9]|1[012])[-/./]\d{1,4}$'
     if re.match(date_pattern, term):
-        return "Date (Nascita/Ricovero/Dimissione)"
+        return "Dates (Birth/Admission/Discharge)"
         
     # 4. Phone numbers / Fax
     phone_pattern = r'^\+?[0-9\s.\-\(\)]{6,20}$'
     if re.match(phone_pattern, term) and any(c.isdigit() for c in term):
         if sum(c.isdigit() for c in term) >= 6:
-            return "Numeri di Telefono / Contatti"
+            return "Phone Numbers / Contacts"
             
     # 5. CAP (Zip Codes)
     if term.isdigit() and len(term) == 5:
-        return "Indirizzi / CAP"
+        return "Addresses / ZIP Codes"
 
     # 6. Cartella Clinica / Codice Paziente
     code_pattern = r'^[A-Za-z0-9\-/_]{5,15}$'
     if re.match(code_pattern, term) and any(c.isdigit() for c in term) and any(c.isalpha() for c in term):
-        return "Codici Identificativi (Cartella/Paziente)"
+        return "ID Codes (Record/Patient)"
     if term.isdigit() and 4 <= len(term) <= 12:
-        return "Codici Identificativi (Cartella/Paziente)"
+        return "ID Codes (Record/Patient)"
         
     # 7. Hospitals / Medical centers
     hospital_keywords = ["ospedale", "policlinico", "clinica", "asl", "ausl", "presidio", "azienda ospedaliera"]
     if any(k in term_lower for k in hospital_keywords):
-        return "Strutture Sanitarie (Ospedali/Cliniche/ASL)"
+        return "Healthcare Facilities (Hospitals/Clinics)"
         
     # 8. Prefixes of doctors/names
     prefixes = ["dr.", "dott.", "dott.ssa", "prof.", "medico", "dr", "dottore", "sig.", "sig.ra"]
     if any(term_lower.startswith(p) for p in prefixes) or any(term_lower.startswith(p + " ") for p in prefixes):
-        return "Nomi Personali (Medici/Pazienti)"
+        return "Personal Names (Doctors/Patients)"
         
     # 9. Name heuristics
     if term.replace(" ", "").isalpha():
         words = term.split()
         if 1 <= len(words) <= 4:
             if all(w[0].isupper() or w.isupper() for w in words):
-                return "Nomi Personali (Medici/Pazienti)"
+                return "Personal Names (Doctors/Patients)"
                 
-    return "Altre Informazioni Sensibili"
+    return "Other Sensitive Information"
