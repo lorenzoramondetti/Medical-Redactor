@@ -59,6 +59,29 @@ from pdf_processor import PDFProcessor
 from ui_components import sidebar_ui, render_page_editor, memory_manager_ui, render_acquisition_wizard
 from worker_state import worker_lock, worker_results, worker_status
 
+# --- DIALOGS ---
+@st.dialog("Alert Dati Sensibili Residui", width="large")
+def show_residues_dialog(filename, residues, p_file):
+    st.error(f"🚨 **ALERT ZERO-ERROR**: Trovati dati sensibili residui nel file '{filename}'. Esportazione in pausa.")
+    st.write("I seguenti termini sensibili sono stati rilevati ma non oscurati:")
+    for res in residues:
+        st.markdown(f"- **{res}**")
+        
+    st.warning("Vuoi procedere forzatamente con l'esportazione ignorando questi termini, oppure tornare alla cartella clinica per correggerli?")
+    
+    col1, col2 = st.columns(2)
+    with col1:
+        if st.button("Torna Indietro (Correggi)", use_container_width=True):
+            st.session_state['start_export_process'] = False
+            st.rerun()
+    with col2:
+        if st.button("Procedi comunque", type="primary", use_container_width=True):
+            if 'ignored_residues_files' not in st.session_state:
+                st.session_state['ignored_residues_files'] = []
+            if p_file not in st.session_state['ignored_residues_files']:
+                st.session_state['ignored_residues_files'].append(p_file)
+            st.rerun()
+
 # --- PAGE CONFIG ---
 st.set_page_config(
     page_title="Medical Redactor - Work in Progress",
@@ -348,14 +371,14 @@ def start_background_analysis(patients_dict):
 
 @st.fragment
 def page_editor_fragment(selected_file, curr_page, processor):
-    col_canvas, col_tools = st.columns([4.0, 1.5])
+    col_toolbar, col_canvas, col_tools = st.columns([0.3, 4.0, 1.5], gap="small")
     # DATA FOR EDITOR
     current_terms = st.session_state['processed_data'][selected_file].get(curr_page, [])
     manual_rects_map = st.session_state['manual_rects'].get(selected_file, {})
     current_manual_rects = manual_rects_map.get(curr_page, [])
     
     # RENDER EDITOR
-    updated_terms, new_rects, apply_to_all, action_undo, action_clear_all, deleted_terms = render_page_editor(col_canvas, col_tools, selected_file, curr_page, processor, current_terms, current_manual_rects)
+    updated_terms, new_rects, apply_to_all, action_undo, action_clear_all, deleted_terms, canvas_mode = render_page_editor(col_toolbar, col_canvas, col_tools, selected_file, curr_page, processor, current_terms, current_manual_rects)
     
     # ELABORAZIONE LOGICA CANVAS
     needs_rerun = False
@@ -366,40 +389,61 @@ def page_editor_fragment(selected_file, curr_page, processor):
         needs_rerun = True
         
     if new_rects and len(new_rects) > len(current_manual_rects):
-        page = processor.doc[curr_page]
-        words = page.get_text("words")
-        import fitz
-        newest_rect = fitz.Rect(new_rects[-1])
-        intersected_words = []
-        
-        for w in words:
-            w_rect = fitz.Rect(w[:4])
-            intersection = newest_rect & w_rect
-            if w_rect.get_area() > 0 and intersection.get_area() > 0:
-                intersected_words.append(w[4])
-                
-        if intersected_words:
-            new_term = " ".join(intersected_words)
-            clean_term = new_term.strip(".,;:()")
-            if clean_term not in updated_terms:
-                updated_terms.append(clean_term)
-                st.toast(f"✅ Added: {clean_term}")
-                
-            # Registra l'aggiunta dello strumento di testo nello storico
-            if 'action_history' not in st.session_state:
-                st.session_state['action_history'] = []
-            st.session_state['action_history'].append({
-                "type": "add_term",
-                "file": selected_file,
-                "page": curr_page,
-                "term": clean_term
-            })
+        if canvas_mode and "Draw Graphic" in canvas_mode:
+            # Skip text extraction and term addition!
+            # The rectangle will be naturally saved as a graphical manual redaction.
+            st.toast("🖍️ Pure graphic redaction saved. Text not extracted.")
+        else:
+            page = processor.doc[curr_page]
+            words = page.get_text("words")
+            import fitz
+            newest_rect = fitz.Rect(new_rects[-1])
+            intersected_words = []
             
-            # Rimuoviamo il rettangolo manuale visto che è stato convertito in termine AI
-            new_rects.pop()
-            # Incrementiamo canvas_rev per forzare il rimontaggio con il nuovo AI rect ed eliminare il manual rect
-            st.session_state[f"canvas_rev_{selected_file}_{curr_page}"] = st.session_state.get(f"canvas_rev_{selected_file}_{curr_page}", 0) + 1
-            needs_rerun = True
+            for w in words:
+                w_rect = fitz.Rect(w[:4])
+                intersection = newest_rect & w_rect
+                if w_rect.get_area() > 0 and intersection.get_area() > 0:
+                    intersected_words.append(w[4])
+                    
+            if intersected_words:
+                new_term = " ".join(intersected_words)
+                clean_term = new_term.strip(".,;:()")
+                term_added_to_list = False
+                if clean_term not in updated_terms:
+                    updated_terms.append(clean_term)
+                    st.toast(f"✅ Added: {clean_term}")
+                    term_added_to_list = True
+                    
+                    # Registra l'aggiunta dello strumento di testo nello storico
+                    if 'action_history' not in st.session_state:
+                        st.session_state['action_history'] = []
+                    st.session_state['action_history'].append({
+                        "type": "add_term",
+                        "file": selected_file,
+                        "page": curr_page,
+                        "term": clean_term
+                    })
+                
+                # Now verify if `search_for` can actually find this text and cover the drawn area
+                # If so, we can rely on AI redaction and pop the manual rectangle.
+                # If not, the text might have weird spacing preventing AI match, so we MUST keep the manual rect!
+                ai_matches = page.search_for(clean_term)
+                ai_covered = False
+                for match_rect in ai_matches:
+                    if newest_rect.intersects(fitz.Rect(match_rect)):
+                        ai_covered = True
+                        break
+                        
+                if ai_covered:
+                    # Safe to remove manual rect, AI rect will take its place
+                    new_rects.pop()
+                    st.session_state[f"canvas_rev_{selected_file}_{curr_page}"] = st.session_state.get(f"canvas_rev_{selected_file}_{curr_page}", 0) + 1
+                    needs_rerun = True
+                else:
+                    # AI search failed to match this exact spot, so keep the manual rect!
+                    if term_added_to_list:
+                        st.toast("⚠️ Term added, but exact match failed. Kept manual drawing.", icon="⚠️")
     
     # UPDATE STATE
     
@@ -923,8 +967,13 @@ Analyzing <code style="background-color: #0F172A; padding: 2px 6px; border-radiu
                 
                 st.markdown('<span id="clinical-green-btn"></span>', unsafe_allow_html=True)
                 if st.button("Yes, Export All", key="btn_confirm_export_yes", use_container_width=True):
+                    st.session_state['start_export_process'] = True
+                    st.session_state['ignored_residues_files'] = []
                     st.session_state['confirm_export'] = False
+                    st.rerun()
                     
+            if st.session_state.get('start_export_process', False):
+                if True:
                     curr_pat = st.session_state['current_patient']
                     synthetic_id = st.session_state['patient_uuids'].get(curr_pat, "UNKNOWN_ID")
                 
@@ -985,9 +1034,27 @@ Analyzing <code style="background-color: #0F172A; padding: 2px 6px; border-radiu
                         
                             pdf_bytes = proc.save_redacted_pdf(redaction_map, rect_map, date_settings)
                         
-                            # 3. Create hierarchy
+                            # --- ZERO-ERROR DOUBLE CHECK ---
+                            import fitz
+                            from redaction_logic import TextAnalyzer
+                            
+                            check_doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+                            final_text = ""
+                            for pg in check_doc:
+                                final_text += pg.get_text("text") + "\n"
+                            
+                            analyzer = TextAnalyzer(st.session_state['memory'], st.session_state.get('llm'))
+                            # Use high threshold (0.90) to minimize false positives during this strict block phase
                             parts = p_file.split("/")
                             original_category = parts[-2] if len(parts) >= 3 else "GENERIC"
+                            residues = analyzer.analyze_text(final_text, category=original_category, custom_threshold=0.90)
+                            
+                            if residues and p_file not in st.session_state.get('ignored_residues_files', []):
+                                show_residues_dialog(parts[-1], residues, p_file)
+                                st.stop()
+                            # -------------------------------
+                        
+                            # 3. Create hierarchy
                             original_filename = parts[-1]
                             
                             cat_files = [f for f in patient_files_to_save if f.split("/")[-2] == original_category] if len(parts) >= 3 else [p_file]
@@ -1114,6 +1181,8 @@ setTimeout(function() {
                         import time; time.sleep(3.0)
                         
                         # Clear active patient and current file to reset state and redirect cleanly back to selection
+                        st.session_state['start_export_process'] = False
+                        st.session_state['ignored_residues_files'] = []
                         if 'current_patient' in st.session_state:
                             del st.session_state['current_patient']
                         if 'current_file' in st.session_state:

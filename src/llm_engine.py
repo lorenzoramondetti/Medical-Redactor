@@ -86,7 +86,7 @@ class LLMEngine:
     def is_ready(self):
         return self.model is not None
 
-    def extract_pii(self, text, category="GENERIC"):
+    def extract_pii(self, text, category="GENERIC", custom_threshold=None):
         if not text.strip():
             return []
             
@@ -104,7 +104,7 @@ class LLMEngine:
                 labels_to_remove = ["Data"]
                 active_labels = [l for l in active_labels if l not in labels_to_remove]
 
-            threshold = SETTINGS.get("ai_threshold", 0.45)
+            threshold = custom_threshold if custom_threshold is not None else SETTINGS.get("ai_threshold", 0.45)
             entities = self.model.predict_entities(text, active_labels, threshold=threshold)
             
             sensitive_terms = set()

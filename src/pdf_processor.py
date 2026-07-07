@@ -140,11 +140,17 @@ class PDFProcessor:
                         if parsed_date:
                             delta = (parsed_date - baseline_date).days
                             if abs(delta) <= date_max_range_days:
-                                day_number = delta + baseline_day_index
-                                replacement_text = f"Day {day_number}"
+                                # Create a fictitious date starting at Jan 1st, 2000 for the baseline date
+                                fictitious_date = datetime.datetime(2000, 1, 1) + datetime.timedelta(days=delta)
+                                replacement_text = fictitious_date.strftime(date_format)
                             
                     for rect in candidates:
                         if self._is_whole_word(rect, term, words):
+                            # Shrink the rectangle vertically to prevent overlapping and erasing adjacent lines
+                            margin = (rect.y1 - rect.y0) * 0.15
+                            rect.y0 += margin
+                            rect.y1 -= margin
+                            
                             if replacement_text:
                                 page.add_redact_annot(rect, text=replacement_text, fill=(0, 0, 0), text_color=(1, 1, 1), fontsize=10, align=fitz.TEXT_ALIGN_CENTER)
                             else:

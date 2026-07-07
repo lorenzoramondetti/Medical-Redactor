@@ -129,7 +129,7 @@ def sidebar_ui(memory, is_review_phase=False, patients_available=None, all_keys=
             date_replacement_active = st.checkbox(
                 "Date Replacement",
                 value=SETTINGS.get("date_replacement_active", False),
-                help="Replaces dates in the PDF with 'Day X' calculated from the baseline date.",
+                help="Replaces dates in the PDF with a fictitious date (e.g., 01/01/2000 for the admission day) calculated from the baseline date.",
                 key="date_repl_check_1"
             )
             
@@ -173,7 +173,7 @@ def sidebar_ui(memory, is_review_phase=False, patients_available=None, all_keys=
                     min_value=1,
                     max_value=36500,
                     value=int(date_max_range_days),
-                    help="Dates further than these days from the baseline date (e.g. date of birth) will be redacted but not replaced with 'Day X'.",
+                    help="Dates further than these days from the baseline date (e.g. date of birth) will be redacted but not replaced with a fictitious date.",
                     key="date_range_1"
                 )
             
@@ -196,7 +196,7 @@ def sidebar_ui(memory, is_review_phase=False, patients_available=None, all_keys=
             date_replacement_active = st.checkbox(
                 "Date Replacement",
                 value=SETTINGS.get("date_replacement_active", False),
-                help="Replaces dates in the PDF with 'Day X' calculated from the baseline date.",
+                help="Replaces dates in the PDF with a fictitious date (e.g., 01/01/2000 for the admission day) calculated from the baseline date.",
                 key="date_repl_check_2"
             )
             
@@ -240,7 +240,7 @@ def sidebar_ui(memory, is_review_phase=False, patients_available=None, all_keys=
                     min_value=1,
                     max_value=36500,
                     value=int(date_max_range_days),
-                    help="Dates further than these days from the baseline date (e.g. date of birth) will be redacted but not replaced with 'Day X'.",
+                    help="Dates further than these days from the baseline date (e.g. date of birth) will be redacted but not replaced with a fictitious date.",
                     key="date_range_2"
                 )
             
@@ -737,7 +737,29 @@ def render_acquisition_wizard(memory):
                 div[data-testid="stMain"] div[data-testid="stNumberInput"] {
                     margin-bottom: 12px !important;
                 }
-                </style>
+    
+            /* Fix for Streamlit parents clipping sticky */
+            div[data-testid="stVerticalBlock"],
+            div[data-testid="stColumn"],
+            div[data-testid="stMainBlockContainer"] {
+                overflow: visible !important;
+            }
+
+            /* Make the toolbar sticky */
+            div[data-testid="stHorizontalBlock"]:has(div[data-testid="stSegmentedControl"]) {
+                position: -webkit-sticky;
+                position: sticky;
+                top: 3.5rem;
+                z-index: 999;
+                background-color: var(--background-color, #0E1117);
+                padding: 10px;
+                border-radius: 8px;
+                border: 1px solid rgba(255, 255, 255, 0.1);
+                box-shadow: 0 8px 16px rgba(0,0,0,0.5);
+                margin-bottom: 10px;
+                backdrop-filter: blur(8px);
+            }
+            </style>
                 """,
                 unsafe_allow_html=True
             )
@@ -782,64 +804,69 @@ def render_acquisition_wizard(memory):
     total = st.session_state['wizard_total']
     current = st.session_state['wizard_current_step']
     
-    # Progress UI
-    progress_val = (current - 1) / total
-    st.progress(progress_val)
-    st.subheader(f"Ingesting Patient {current} of {total}")
-    
-    # Generate UUID for the current step immediately
-    uuid_key = f"wizard_uuid_{current}"
-    import uuid
-    if uuid_key not in st.session_state:
-        st.session_state[uuid_key] = uuid.uuid4().hex[:8].upper()
-    
-    assigned_uuid = st.session_state[uuid_key]
-    
-    st.info(f"🔒 **Anonymous ID Assigned:** `{assigned_uuid}`")
-    
-    st.markdown("---")
-    
-    c1, c2 = st.columns(2)
-    with c1:
-        st.markdown("### 📘 Clinical Records")
-        st.caption("Descriptive documents containing prose and names.")
-        clinica_files = st.file_uploader("Upload Clinical Records", type="pdf", accept_multiple_files=True, key=f"up_c_{current}")
+    phase2_placeholder = st.empty()
+    with phase2_placeholder.container():
+        # Progress UI
+        progress_val = (current - 1) / total
+        st.progress(progress_val)
+        st.subheader(f"Ingesting Patient {current} of {total}")
         
-    with c2:
-        st.markdown("### 📊 Structured Data")
-        st.caption("Tabular lab results, blood work, etc.")
-        laboratori_files = st.file_uploader("Upload Lab Results", type="pdf", accept_multiple_files=True, key=f"up_l_{current}")
+        # Generate UUID for the current step immediately
+        uuid_key = f"wizard_uuid_{current}"
+        import uuid
+        if uuid_key not in st.session_state:
+            st.session_state[uuid_key] = uuid.uuid4().hex[:8].upper()
+        
+        assigned_uuid = st.session_state[uuid_key]
+        
+        st.info(f"🔒 **Anonymous ID Assigned:** `{assigned_uuid}`")
+        
+        st.markdown("---")
+        
+        c1, c2 = st.columns(2)
+        with c1:
+            st.markdown("### 📘 Clinical Records")
+            st.caption("Descriptive documents containing prose and names.")
+            clinica_files = st.file_uploader("Upload Clinical Records", type="pdf", accept_multiple_files=True, key=f"up_c_{current}")
+            
+        with c2:
+            st.markdown("### 📊 Structured Data")
+            st.caption("Tabular lab results, blood work, etc.")
+            laboratori_files = st.file_uploader("Upload Lab Results", type="pdf", accept_multiple_files=True, key=f"up_l_{current}")
 
-    st.markdown("---")
-    
-    c3, c4 = st.columns(2)
-    with c3:
-        st.markdown("### 🩺 Instrumental Exams")
-        st.caption("ECGs, radiological reports, spirometry, etc.")
-        esami_files = st.file_uploader("Upload Instrumental Exams", type="pdf", accept_multiple_files=True, key=f"up_e_{current}")
+        st.markdown("---")
         
-    with c4:
-        st.markdown("### 👨‍⚕️ Specialist Consultations")
-        st.caption("Specialist visit reports (cardiology, neurology, etc.)")
-        consulenze_files = st.file_uploader("Upload Specialist Consultations", type="pdf", accept_multiple_files=True, key=f"up_s_{current}")
+        c3, c4 = st.columns(2)
+        with c3:
+            st.markdown("### 🩺 Instrumental Exams")
+            st.caption("ECGs, radiological reports, spirometry, etc.")
+            esami_files = st.file_uploader("Upload Instrumental Exams", type="pdf", accept_multiple_files=True, key=f"up_e_{current}")
+            
+        with c4:
+            st.markdown("### 👨‍⚕️ Specialist Consultations")
+            st.caption("Specialist visit reports (cardiology, neurology, etc.)")
+            consulenze_files = st.file_uploader("Upload Specialist Consultations", type="pdf", accept_multiple_files=True, key=f"up_s_{current}")
+            
+        st.markdown("---")
         
-    st.markdown("---")
-    
-    btn_c1, btn_c2, btn_c3 = st.columns([1, 2, 1])
-    
-    with btn_c1:
-         if current > 1:
-             if st.button("⬅️ Back"):
-                 st.session_state['wizard_current_step'] -= 1
-                 st.rerun()
-                 
-    with btn_c3:
-        btn_label = "Capture & Next ➡️" if current < total else "Capture & Finish Batch ✅"
+        btn_c1, btn_c2, btn_c3 = st.columns([1, 2, 1])
         
-        if st.button(btn_label, type="primary"):
-             if not clinica_files and not laboratori_files and not esami_files and not consulenze_files:
-                 st.error("You must upload at least one file to proceed.")
-             else:
+        with btn_c1:
+             if current > 1:
+                 if st.button("⬅️ Back"):
+                     st.session_state['wizard_current_step'] -= 1
+                     st.rerun()
+                     
+        with btn_c3:
+            btn_label = "Capture & Next ➡️" if current < total else "Capture & Finish Batch ✅"
+            btn_clicked = st.button(btn_label, type="primary")
+
+    if btn_clicked:
+         if not clinica_files and not laboratori_files and not esami_files and not consulenze_files:
+             st.error("You must upload at least one file to proceed.")
+         else:
+             phase2_placeholder.empty()
+             with st.spinner("💾 Ingestion and encryption of batch data... please wait."):
                  # Construct physical staging envelope
                  target_pat_dir = STAGING_DIR / assigned_uuid
                  dir_clinica = target_pat_dir / "CARTELLA_CLINICA"
@@ -875,7 +902,7 @@ def render_acquisition_wizard(memory):
     render_diagnostic_panel(memory)
     return False
 
-def render_page_editor(col_canvas, col_tools, file_name, page_index, pdf_processor, current_terms, manual_rects_for_page):
+def render_page_editor(col_toolbar, col_canvas, col_tools, file_name, page_index, pdf_processor, current_terms, manual_rects_for_page):
     """
     Renders the editor for a single page:
     - Left: Canvas for manual redaction
@@ -883,6 +910,119 @@ def render_page_editor(col_canvas, col_tools, file_name, page_index, pdf_process
     Returns: (updated_terms_list, new_manual_rects_for_page_or_None)
     """
     
+    st.markdown(
+        """
+        <img src onerror='
+            const doc = document;
+            if (!window.__ctrl_listener_added) {
+                window.addEventListener("keydown", function(e) {
+                    if (e.key === "Control" && !e.repeat) {
+                        if (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA") return;
+                        let els = doc.querySelectorAll(`div[data-testid="stSegmentedControl"] label`);
+                        if (els.length === 0) els = doc.querySelectorAll(`div[data-testid="stSegmentedControl"] button`);
+                        for (let b of els) {
+                            if (b.textContent.includes("Delete")) {
+                                b.click();
+                            }
+                        }
+                    }
+                });
+                window.addEventListener("keyup", function(e) {
+                    if (e.key === "Control") {
+                        if (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA") return;
+                        let els = doc.querySelectorAll(`div[data-testid="stSegmentedControl"] label`);
+                        if (els.length === 0) els = doc.querySelectorAll(`div[data-testid="stSegmentedControl"] button`);
+                        for (let b of els) {
+                            if (b.textContent.includes("Draw Text")) {
+                                b.click();
+                            }
+                        }
+                    }
+                });
+                window.__ctrl_listener_added = true;
+            }
+        ' style="display:none;">
+        """,
+        unsafe_allow_html=True
+    )
+    
+    # --- Toolbar Column (Left) ---
+    with col_toolbar:
+        st.markdown(
+            """
+            <style>
+            /* The column itself */
+            div[data-testid="stColumn"]:has(#left-toolbar-anchor) {
+                position: -webkit-sticky !important;
+                position: sticky !important;
+                top: 5rem !important;
+                height: 450px !important;
+                z-index: 999 !important;
+                overflow: visible !important;
+            }
+
+            /* Absolute positioning and rotation for the segmented control container */
+            div.element-container:has(#left-toolbar-anchor) + div.element-container > div,
+            div[data-testid="stColumn"]:has(#left-toolbar-anchor) div[data-testid="stSegmentedControl"] {
+                position: absolute !important;
+                top: 400px !important;
+                left: 10px !important;
+                width: 400px !important;
+                transform: rotate(-90deg) !important;
+                transform-origin: left top !important;
+                background: transparent !important;
+            }
+
+            /* Hide the title label ("Select mode") */
+            div.element-container:has(#left-toolbar-anchor) + div.element-container > div > label,
+            div[data-testid="stColumn"]:has(#left-toolbar-anchor) div[data-testid="stSegmentedControl"] > label {
+                display: none !important;
+            }
+
+            /* Style the horizontal button container so it looks like a unified bar */
+            div[data-testid="stColumn"]:has(#left-toolbar-anchor) div[data-testid="stSegmentedControl"] > div {
+                background-color: var(--background-color, #1E293B) !important;
+                border-radius: 8px !important;
+                border: 1px solid rgba(255, 255, 255, 0.1) !important;
+                box-shadow: 0 4px 6px rgba(0,0,0,0.3) !important;
+                padding: 5px !important;
+                height: 100% !important;
+                display: flex !important;
+                align-items: stretch !important;
+            }
+
+            /* Make sure the text is large enough and centered */
+            div[data-testid="stColumn"]:has(#left-toolbar-anchor) div[data-testid="stSegmentedControl"] * {
+                font-size: 1.05em !important;
+            }
+
+            /* Colors matching the mockup (border-top becomes the left border after -90deg rotation). 
+               We target nth-child 2,3,4 assuming child 1 is the animated background div. */
+            div[data-testid="stColumn"]:has(#left-toolbar-anchor) div[data-testid="stSegmentedControl"] > div > :nth-child(2) {
+                border-top: 4px solid #EF4444 !important;
+            }
+            div[data-testid="stColumn"]:has(#left-toolbar-anchor) div[data-testid="stSegmentedControl"] > div > :nth-child(3) {
+                border-top: 4px solid #10B981 !important;
+            }
+            div[data-testid="stColumn"]:has(#left-toolbar-anchor) div[data-testid="stSegmentedControl"] > div > :nth-child(4) {
+                border-top: 4px solid #F97316 !important;
+            }
+            </style>
+            """, unsafe_allow_html=True
+        )
+        
+        st.markdown("<div id='left-toolbar-anchor' style='margin-top: 60px;'></div>", unsafe_allow_html=True)
+        
+        canvas_mode = st.segmented_control(
+            "Select mode", 
+            options=["✏️ Draw Text", "🖍️ Draw Graphic", "🧹 Delete"], 
+            default="✏️ Draw Text",
+            key=f"canvas_mode_{file_name}_{page_index}",
+            label_visibility="collapsed"
+        )
+        
+        drawing_mode = "rect" if "Draw" in canvas_mode else "transform"
+
     # --- Text Column ---
     with col_tools:
         st.subheader("Text Redaction")
@@ -968,7 +1108,7 @@ def render_page_editor(col_canvas, col_tools, file_name, page_index, pdf_process
         if added_filtered or removed_filtered:
             rev_key_temp = f"canvas_rev_{file_name}_{page_index}"
             st.session_state[rev_key_temp] = st.session_state.get(rev_key_temp, 0) + 1
-            
+
         # Graphical Redaction legend and controls enclosed in a styled container
         with st.container(border=True):
             st.markdown(
@@ -998,6 +1138,13 @@ def render_page_editor(col_canvas, col_tools, file_name, page_index, pdf_process
     # --- Canvas Column ---
     with col_canvas:
         st.subheader("🔎 Manual Redaction")
+        
+        if canvas_mode == "✏️ Draw Text":
+            st.info("✏️ **Draw Text Mode:** Click and drag to highlight text, logos, or barcodes. Text will be extracted and redacted globally.")
+        elif canvas_mode == "🖍️ Draw Graphic":
+            st.info("🖍️ **Draw Graphic Mode:** Pure graphic redaction. No text is extracted. Use only for specific rare exceptions.")
+        elif canvas_mode == "🧹 Delete":
+            st.info("🧹 **Delete Mode Active:** Double-click on any red rectangle to delete it, or click to select it and press **DELETE**.")
         
         # Mode switch and Zoom controls
         if 'canvas_width' not in st.session_state:
@@ -1031,19 +1178,18 @@ def render_page_editor(col_canvas, col_tools, file_name, page_index, pdf_process
                 color: #F8FAFC !important;
                 border-radius: 6px !important;
             }
+
+            /* Fix for Streamlit parents clipping sticky */
+            div[data-testid="stVerticalBlock"],
+            div[data-testid="stColumn"],
+            div[data-testid="stMainBlockContainer"] {
+                overflow: visible !important;
+            }
             </style>
             """, unsafe_allow_html=True
         )
 
-        col_mode, col_spacer, col_zoom = st.columns([1.5, 1.5, 1.2])
-        with col_mode:
-            canvas_mode = st.segmented_control(
-                "Select mode", 
-                options=["✏️ Draw", "🧹 Delete"], 
-                default="✏️ Draw",
-                key=f"canvas_mode_{file_name}_{page_index}",
-                label_visibility="collapsed"
-            )
+        col_spacer, col_zoom = st.columns([3.0, 1.2])
         with col_zoom:
             zoom_pct = int(canvas_width / 1100 * 100)
             z_col1, z_col2, z_col3 = st.columns([1, 1.2, 1], gap="small")
@@ -1059,13 +1205,6 @@ def render_page_editor(col_canvas, col_tools, file_name, page_index, pdf_process
                 if st.button("➕", key=f"zoom_in_{file_name}_{page_index}", help="Zoom In", use_container_width=True):
                     st.session_state['canvas_width'] = min(2200, canvas_width + 100)
                     st.rerun()
-                    
-        drawing_mode = "rect" if canvas_mode == "✏️ Draw" else "transform"
-        
-        if drawing_mode == "rect":
-            st.info("✏️ **Draw Mode Active:** Click and drag your left mouse button on the document canvas to highlight and redact any non-textual elements like signatures, logos, or barcodes.")
-        elif drawing_mode == "transform":
-            st.info("🧹 **Delete Mode Active:** Double-click on any red rectangle to delete it, or click to select it and press **DELETE / Backspace** on your keyboard.")
                 
         # Render background image
         # Cache the generated PIL image object. If we pass a brand new PIL image pointer to st_canvas 
@@ -1113,7 +1252,14 @@ def render_page_editor(col_canvas, col_tools, file_name, page_index, pdf_process
                     border-radius: 8px !important;
                     padding: 15px !important;
                 }
-                </style>
+    
+            /* Fix for Streamlit parents clipping sticky */
+            div[data-testid="stVerticalBlock"],
+            div[data-testid="stColumn"],
+            div[data-testid="stMainBlockContainer"] {
+                overflow: visible !important;
+            }
+            </style>
                 """,
                 unsafe_allow_html=True
             )
@@ -1264,7 +1410,7 @@ def render_page_editor(col_canvas, col_tools, file_name, page_index, pdf_process
                 
                 if is_transient:
                     # Return None for new_user_rects to prevent transient empty canvas from clearing manual drawings
-                    return updated_terms, None, apply_to_all, action_undo, action_clear_all, []
+                    return updated_terms, None, apply_to_all, action_undo, action_clear_all, [], canvas_mode
                 
                 # Detect deleted AI terms from canvas (only in active transform/delete mode to prevent loading race-conditions)
                 deleted_terms = []
@@ -1273,13 +1419,13 @@ def render_page_editor(col_canvas, col_tools, file_name, page_index, pdf_process
                         if f"ai_{idx}" not in remaining_ai_ids:
                             deleted_terms.append(r_data["term"])
                 
-                return updated_terms, new_user_rects, apply_to_all, action_undo, action_clear_all, deleted_terms
+                return updated_terms, new_user_rects, apply_to_all, action_undo, action_clear_all, deleted_terms, canvas_mode
             else:
-                return updated_terms, None, apply_to_all, action_undo, action_clear_all, []
+                return updated_terms, None, apply_to_all, action_undo, action_clear_all, [], canvas_mode
             
         else:
             st.error("Error rendering page.")
-            return updated_terms, None, False, False, False, []
+            return updated_terms, None, False, False, False, [], None
 @st.fragment
 def memory_manager_ui(memory, in_sidebar=False):
     # Inject CSS for high-density, compact lists with subtle separators and monospace monospace styling

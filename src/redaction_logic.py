@@ -184,7 +184,7 @@ class TextAnalyzer:
                 
         return patterns
 
-    def analyze_text(self, text, category="GENERIC"):
+    def analyze_text(self, text, category="GENERIC", custom_threshold=None):
         if not text.strip():
             return []
 
@@ -209,7 +209,7 @@ class TextAnalyzer:
         
         # 3. AI Extraction
         if self.llm_engine and self.llm_engine.is_ready():
-            llm_terms = self.llm_engine.extract_pii(text, category=category)
+            llm_terms = self.llm_engine.extract_pii(text, category=category, custom_threshold=custom_threshold)
             filtered_llm = self.memory.filter_terms(llm_terms, is_pii=True)
             found_terms.update(filtered_llm)
         
